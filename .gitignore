@@ -26,6 +26,9 @@ go.work.sum
 .env
 .env.local
 
+# macOS
+.DS_Store
+
 # Common IDEs and editors
 .idea/
 .vscode/
