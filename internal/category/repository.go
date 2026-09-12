@@ -5,31 +5,25 @@ import (
 	"errors"
 	"time"
 
+	"github.com/amit9838/splitwise-backend-go/internal/pkg/response"
+	"github.com/amit9838/splitwise-backend-go/internal/pkg/util"
 	"github.com/google/uuid"
 )
 
-// Categories are public
-// TODO: make it grouped scopped in future
-type CategoryStore interface {
-	Create(c Category) (Category, error)
-	GetById(id string) (Category, error)
-	Update(id string, g_id string, c Category) (Category, error)
-	ListByGroup(g_id string) ([]Category, error)
-	Delete(id string, g_id string) (Category, error)
-}
+const categoryColumns = `id, group_id, name, is_active, created_at, updated_at`
 
-// DBStore implements Store using a SQLite database
+// DBStore implements CategoryStore using a SQLite database.
 type DBStore struct {
 	db *sql.DB
 }
 
-// NewDBStore creates a new DBStore. It expects the database
-// to be already opened and the schema to be created.
-
+// NewDBStore creates a new DBStore. It expects the database to be
+// already opened and the schema to be created.
 func NewDBStore(db *sql.DB) *DBStore {
 	return &DBStore{db: db}
 }
 
+// InitSchema creates the categories table if it does not exist.
 func (s *DBStore) InitSchema() error {
 	const query = `
 		CREATE TABLE IF NOT EXISTS categories(
@@ -45,6 +39,7 @@ func (s *DBStore) InitSchema() error {
 	return err
 }
 
+// CreateIndexes creates the indexes used by category queries.
 func (s *DBStore) CreateIndexes() error {
 	const query = `
 	CREATE INDEX IF NOT EXISTS idx_categories_group_id ON categories(group_id);
@@ -53,24 +48,50 @@ func (s *DBStore) CreateIndexes() error {
 	return err
 }
 
-// Create category
+// rowScanner is satisfied by both *sql.Row and *sql.Rows.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanCategory reads a single category row and converts stored values to the model.
+func scanCategory(scanner rowScanner) (Category, error) {
+	var (
+		c                      Category
+		isActiveInt            int
+		createdStr, updatedStr string
+	)
+
+	if err := scanner.Scan(&c.ID, &c.GroupId, &c.Name, &isActiveInt, &createdStr, &updatedStr); err != nil {
+		return Category{}, err
+	}
+	c.IsActive = util.IntToBool(isActiveInt)
+
+	var err error
+	if c.CreatedAt, err = time.Parse(time.RFC3339, createdStr); err != nil {
+		return Category{}, err
+	}
+	if c.UpdatedAt, err = time.Parse(time.RFC3339, updatedStr); err != nil {
+		return Category{}, err
+	}
+	return c, nil
+}
+
+// Create inserts a new category.
 func (s *DBStore) Create(c Category) (Category, error) {
 	now := time.Now()
 	c.ID = uuid.NewString()
 	c.CreatedAt = now
 	c.UpdatedAt = now
-
-	// format timestamp
-	formatted_ts := now.Format(time.RFC3339)
+	formattedTS := now.Format(time.RFC3339)
 
 	_, err := s.db.Exec(
 		`INSERT INTO categories (id, group_id, name, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		c.ID,
 		c.GroupId,
 		c.Name,
-		boolToInt(c.IsActive),
-		formatted_ts,
-		formatted_ts,
+		util.BoolToInt(c.IsActive),
+		formattedTS,
+		formattedTS,
 	)
 	if err != nil {
 		return Category{}, err
@@ -78,63 +99,37 @@ func (s *DBStore) Create(c Category) (Category, error) {
 	return c, nil
 }
 
-// Get category
+// GetById returns a category by id.
 func (s *DBStore) GetById(id string) (Category, error) {
-	var c Category
-	var isActiveInt int
-	var createdStr, updatedStr string
 	row := s.db.QueryRow(
-		"SELECT id, group_id, name, is_active, created_at, updated_at from categories where id = ?",
+		"SELECT "+categoryColumns+" FROM categories WHERE id = ?",
 		id,
 	)
 
-	err := row.Scan(&c.ID, &c.GroupId, &c.Name, &isActiveInt, &createdStr, &updatedStr)
+	c, err := scanCategory(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return Category{}, ErrNotFound
+			return Category{}, response.ErrNotFound
 		}
-		return Category{}, err
-	}
-	c.IsActive = intToBool(isActiveInt)
-	c.CreatedAt, err = time.Parse(time.RFC3339, createdStr)
-	if err != nil {
-		return Category{}, err
-	}
-	c.UpdatedAt, err = time.Parse(time.RFC3339, updatedStr)
-	if err != nil {
 		return Category{}, err
 	}
 	return c, nil
 }
 
-// List categories
-func (s *DBStore) ListByGroup(g_id string) ([]Category, error) {
+// ListByGroup returns all categories belonging to a group.
+func (s *DBStore) ListByGroup(groupID string) ([]Category, error) {
 	rows, err := s.db.Query(
-		"SELECT id, group_id, name, is_active, created_at, updated_at from categories where group_id = ?",
-		g_id,
+		"SELECT "+categoryColumns+" FROM categories WHERE group_id = ?",
+		groupID,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	// New structures categories
 	categories := make([]Category, 0)
 	for rows.Next() {
-		var c Category
-		var isActiveInt int
-		var createdStr, updatedStr string
-
-		err := rows.Scan(&c.ID, &c.GroupId, &c.Name, &isActiveInt, &createdStr, &updatedStr)
-		if err != nil {
-			return []Category{}, err
-		}
-		c.IsActive = intToBool(isActiveInt)
-		c.CreatedAt, err = time.Parse(time.RFC3339, createdStr)
-		if err != nil {
-			return []Category{}, err
-		}
-		c.UpdatedAt, err = time.Parse(time.RFC3339, updatedStr)
+		c, err := scanCategory(rows)
 		if err != nil {
 			return []Category{}, err
 		}
@@ -143,47 +138,42 @@ func (s *DBStore) ListByGroup(g_id string) ([]Category, error) {
 	return categories, rows.Err()
 }
 
-// Update categories
-func (s *DBStore) Update(id string, g_id string, c Category) (Category, error) {
+// Update modifies a category scoped to its group.
+func (s *DBStore) Update(id, groupID string, c Category) (Category, error) {
 	existing, err := s.GetById(id)
 	if err != nil {
 		return Category{}, err
 	}
-	if existing.GroupId != g_id {
-		return Category{}, ErrNotFound
+	if existing.GroupId != groupID {
+		return Category{}, response.ErrNotFound
 	}
-
-	now := time.Now()
-	formatted_ts := now.Format(time.RFC3339)
 
 	_, err = s.db.Exec(
 		`UPDATE categories SET name = ?, is_active = ?, updated_at = ? WHERE id = ?`,
 		c.Name,
-		boolToInt(c.IsActive),
-		formatted_ts,
+		util.BoolToInt(c.IsActive),
+		time.Now().Format(time.RFC3339),
 		id,
 	)
 	if err != nil {
 		return Category{}, err
 	}
-
 	return s.GetById(id)
 }
 
-// Delete categories
-func (s *DBStore) Delete(id string, g_id string) (Category, error) {
+// Delete removes a category scoped to its group.
+func (s *DBStore) Delete(id, groupID string) (Category, error) {
 	existing, err := s.GetById(id)
 	if err != nil {
 		return Category{}, err
 	}
-	if existing.GroupId != g_id {
-		return Category{}, ErrNotFound
+	if existing.GroupId != groupID {
+		return Category{}, response.ErrNotFound
 	}
 
 	_, err = s.db.Exec(`DELETE FROM categories WHERE id = ?`, id)
 	if err != nil {
 		return Category{}, err
 	}
-
 	return existing, nil
 }

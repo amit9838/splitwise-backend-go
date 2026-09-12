@@ -62,7 +62,7 @@ func main() {
 	mux.HandleFunc("/", rootHandler)
 	mux.HandleFunc("GET /health", healthHandler)
 
-	categoryHandler := category.NewHandler(catStore)
+	categoryHandler := category.NewHandler(category.NewService(catStore))
 	// category
 	mux.HandleFunc("POST /categories", categoryHandler.Create)
 	mux.HandleFunc("GET /categories/{group_id}", categoryHandler.List)

@@ -1,33 +1,69 @@
 package category
 
-import (
-	"encoding/json"
-	"errors"
-	"net/http"
+import "errors"
+
+var (
+	ErrGroupRequired = errors.New("group_id is required")
+	ErrNameRequired  = errors.New("name is required")
+	ErrInvalidAccess = errors.New("invalid access")
 )
 
-var ErrNotFound = errors.New("category not found")
-
-// write json
-func writeJSON(w http.ResponseWriter, status int, val any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(val)
+// CategoryStore is the persistence layer required by Service.
+type CategoryStore interface {
+	Create(c Category) (Category, error)
+	GetById(id string) (Category, error)
+	Update(id, groupID string, c Category) (Category, error)
+	ListByGroup(groupID string) ([]Category, error)
+	Delete(id, groupID string) (Category, error)
 }
 
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
+// Service holds the category business rules and delegates persistence to a CategoryStore.
+type Service struct {
+	store CategoryStore
 }
 
-// ========== HELPERS ===========
-// Helper functions to convert between bool and int (SQLite stores booleans as 0/1)
-func boolToInt(b bool) int {
-	if b {
-		return 1
+func NewService(store CategoryStore) *Service {
+	return &Service{store: store}
+}
+
+// Create validates and creates a category. New categories are active by default.
+func (s *Service) Create(c Category) (Category, error) {
+	if c.GroupId == "" {
+		return Category{}, ErrGroupRequired
 	}
-	return 0
+	if c.Name == "" {
+		return Category{}, ErrNameRequired
+	}
+	c.IsActive = true
+	return s.store.Create(c)
 }
 
-func intToBool(i int) bool {
-	return i != 0
+// GetById returns a category scoped to its group.
+func (s *Service) GetById(id, groupID string) (Category, error) {
+	c, err := s.store.GetById(id)
+	if err != nil {
+		return Category{}, err
+	}
+	if c.GroupId != groupID {
+		return Category{}, ErrInvalidAccess
+	}
+	return c, nil
+}
+
+// ListByGroup returns all categories for a group.
+func (s *Service) ListByGroup(groupID string) ([]Category, error) {
+	return s.store.ListByGroup(groupID)
+}
+
+// Update modifies a category scoped to its group.
+func (s *Service) Update(id, groupID string, c Category) (Category, error) {
+	if c.Name == "" {
+		return Category{}, ErrNameRequired
+	}
+	return s.store.Update(id, groupID, c)
+}
+
+// Delete removes a category scoped to its group.
+func (s *Service) Delete(id, groupID string) (Category, error) {
+	return s.store.Delete(id, groupID)
 }
