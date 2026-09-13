@@ -3,6 +3,7 @@ package category
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/amit9838/splitwise-backend-go/internal/pkg/response"
@@ -33,18 +34,26 @@ func (s *DBStore) InitSchema() error {
 		is_active INTEGER NOT NULL DEFAULT 0,
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL,
-		FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+		FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+		UNIQUE(group_id, name)
 		);`
 	_, err := s.db.Exec(query)
 	return err
 }
 
-// CreateIndexes creates the indexes used by category queries.
+// CreateIndexes creates the indexes used by category queries. The unique
+// index also enforces one category name per group on databases whose
+// categories table predates the table-level UNIQUE constraint.
 func (s *DBStore) CreateIndexes() error {
-	const query = `
-	CREATE INDEX IF NOT EXISTS idx_categories_group_id ON categories(group_id);
-	`
-	_, err := s.db.Exec(query)
+	const groupIDIndex = `
+	CREATE INDEX IF NOT EXISTS idx_categories_group_id ON categories(group_id);`
+	const groupNameUniqueIndex = `
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_group_name ON categories(group_id, name);`
+
+	if _, err := s.db.Exec(groupIDIndex); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(groupNameUniqueIndex)
 	return err
 }
 
@@ -76,6 +85,16 @@ func scanCategory(scanner rowScanner) (Category, error) {
 	return c, nil
 }
 
+// isUniqueViolation reports whether err is a SQLite UNIQUE constraint failure.
+func isUniqueViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+
+// isForeignKeyViolation reports whether err is a SQLite FOREIGN KEY constraint failure.
+func isForeignKeyViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "FOREIGN KEY constraint failed")
+}
+
 // Create inserts a new category.
 func (s *DBStore) Create(c Category) (Category, error) {
 	now := time.Now()
@@ -94,6 +113,12 @@ func (s *DBStore) Create(c Category) (Category, error) {
 		formattedTS,
 	)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return Category{}, ErrDuplicateName
+		}
+		if isForeignKeyViolation(err) {
+			return Category{}, ErrGroupNotFound
+		}
 		return Category{}, err
 	}
 	return c, nil
@@ -156,6 +181,9 @@ func (s *DBStore) Update(id, groupID string, c Category) (Category, error) {
 		id,
 	)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return Category{}, ErrDuplicateName
+		}
 		return Category{}, err
 	}
 	return s.GetById(id)

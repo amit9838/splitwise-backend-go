@@ -6,6 +6,8 @@ var (
 	ErrGroupRequired = errors.New("group_id is required")
 	ErrNameRequired  = errors.New("name is required")
 	ErrInvalidAccess = errors.New("invalid access")
+	ErrDuplicateName = errors.New("category already exists")
+	ErrGroupNotFound = errors.New("group not found")
 )
 
 // CategoryStore is the persistence layer required by Service.

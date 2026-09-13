@@ -52,6 +52,14 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			response.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if errors.Is(err, ErrDuplicateName) {
+			response.WriteError(w, http.StatusBadRequest, "Category already exists!")
+			return
+		}
+		if errors.Is(err, ErrGroupNotFound) {
+			response.WriteError(w, http.StatusNotFound, "group not found")
+			return
+		}
 		response.WriteError(w, http.StatusInternalServerError, "failed to create category")
 		return
 	}
@@ -121,6 +129,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, ErrNameRequired) {
 			response.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if errors.Is(err, ErrDuplicateName) {
+			response.WriteError(w, http.StatusBadRequest, "Category already exists!")
 			return
 		}
 		response.WriteError(w, http.StatusInternalServerError, "failed to update category")
