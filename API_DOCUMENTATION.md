@@ -29,10 +29,12 @@ Complete reference for the frontend team to integrate with the Expense Manager b
 | Content Type | `application/json` |
 | Authentication | Bearer JWT (see [Authentication](#authentication)) |
 | Health check | `GET /health` |
+| Interactive docs | `GET /docs` (Swagger UI), `GET /redoc` (ReDoc) |
+| OpenAPI spec | `GET /docs/openapi.yaml` |
 
 All request/response bodies are JSON. IDs are UUIDs serialized as strings. Monetary amounts are JSON **numbers** rounded to two decimals (e.g. `150.5`, `33.34`). Datetimes are RFC 3339 strings.
 
-Routes have **no `/api` prefix** — e.g. `POST /auth/login`, `GET /groups`.
+All API routes are prefixed with **`/api`** — e.g. `POST /api/auth/login`, `GET /api/groups`. The operational endpoints `/` and `GET /health` sit outside the prefix.
 
 ---
 
@@ -55,13 +57,13 @@ Authorization: Bearer <access_token>
 
 1. Register or login to get `access_token` + `refresh_token`.
 2. Send `access_token` as Bearer token on protected requests.
-3. When the access token expires, call `POST /auth/refresh` with the `refresh_token` to get a new pair.
+3. When the access token expires, call `POST /api/auth/refresh` with the `refresh_token` to get a new pair.
 
 **Public endpoints (no auth required):**
-- `POST /auth/register`
-- `POST /auth/login`
-- `POST /auth/refresh`
-- `POST /users`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/refresh`
+- `POST /api/users`
 
 All other endpoints require a valid access token. The signing secret is read from the `JWT_SECRET` environment variable (a development default with a startup warning is used when unset).
 
@@ -69,7 +71,7 @@ All other endpoints require a valid access token. The signing secret is read fro
 
 ## Auth Endpoints
 
-### `POST /auth/register`
+### `POST /api/auth/register`
 
 Register a new user. **No auth required.**
 
@@ -109,7 +111,7 @@ Register a new user. **No auth required.**
 
 ---
 
-### `POST /auth/login`
+### `POST /api/auth/login`
 
 Authenticate and receive tokens. **No auth required.**
 
@@ -140,7 +142,7 @@ Email matching is case-insensitive (the address is trimmed and lowercased before
 
 ---
 
-### `POST /auth/refresh`
+### `POST /api/auth/refresh`
 
 Exchange a refresh token for a new token pair. **No auth required.**
 
@@ -159,7 +161,7 @@ Exchange a refresh token for a new token pair. **No auth required.**
 
 ---
 
-### `GET /auth/me`
+### `GET /api/auth/me`
 
 Get the currently authenticated user. **Auth required.**
 
@@ -185,13 +187,13 @@ User object shape (password is never serialized):
 }
 ```
 
-### `GET /users`
+### `GET /api/users`
 
 List all users. **Auth required.** → `200 OK` with a JSON array of user objects.
 
 ---
 
-### `GET /users/{user_id}`
+### `GET /api/users/{user_id}`
 
 Get a single user by ID. **Auth required.**
 
@@ -200,13 +202,13 @@ Get a single user by ID. **Auth required.**
 
 ---
 
-### `POST /users`
+### `POST /api/users`
 
-Create a user. **No auth required.** Same body and behavior as `POST /auth/register`.
+Create a user. **No auth required.** Same body and behavior as `POST /api/auth/register`.
 
 ---
 
-### `PUT /users/{user_id}`
+### `PUT /api/users/{user_id}`
 
 Update a user. **Auth required.** All fields optional; only provided fields are updated.
 
@@ -236,7 +238,7 @@ Update a user. **Auth required.** All fields optional; only provided fields are 
 
 ---
 
-### `DELETE /users/{user_id}`
+### `DELETE /api/users/{user_id}`
 
 Delete a user. **Auth required.**
 
@@ -264,7 +266,7 @@ Category object shape:
 }
 ```
 
-### `POST /categories`
+### `POST /api/categories`
 
 Create a category in a group. **Auth required.**
 
@@ -286,13 +288,13 @@ Create a category in a group. **Auth required.**
 
 ---
 
-### `GET /categories/{group_id}`
+### `GET /api/categories/{group_id}`
 
 List a group's categories. **Auth required.** → `200 OK` with a JSON array.
 
 ---
 
-### `GET /categories/{group_id}/{id}`
+### `GET /api/categories/{group_id}/{id}`
 
 Get a single category. **Auth required.**
 
@@ -302,7 +304,7 @@ Get a single category. **Auth required.**
 
 ---
 
-### `PUT /categories/{group_id}/{id}`
+### `PUT /api/categories/{group_id}/{id}`
 
 Update a category. **Auth required.**
 
@@ -325,7 +327,7 @@ Both fields are required.
 
 ---
 
-### `DELETE /categories/{group_id}/{id}`
+### `DELETE /api/categories/{group_id}/{id}`
 
 Delete a category. **Auth required.**
 
@@ -366,7 +368,7 @@ Group object shape (members are included in all group responses):
 }
 ```
 
-### `GET /groups`
+### `GET /api/groups`
 
 List groups the current user is an **active member** of. **Auth required.**
 
@@ -374,7 +376,7 @@ List groups the current user is an **active member** of. **Auth required.**
 
 ---
 
-### `GET /groups/{group_id}`
+### `GET /api/groups/{group_id}`
 
 Get a single group with members. **Auth required.**
 
@@ -383,7 +385,7 @@ Get a single group with members. **Auth required.**
 
 ---
 
-### `POST /groups`
+### `POST /api/groups`
 
 Create a group. **Auth required.** The **authenticated user** is the creator and is automatically added as a member (do not send `created_by` — it comes from the token). The group, the creator membership and any extra members are created in one transaction.
 
@@ -415,7 +417,7 @@ Create a group. **Auth required.** The **authenticated user** is the creator and
 
 ---
 
-### `PUT /groups/{group_id}`
+### `PUT /api/groups/{group_id}`
 
 Update a group. **Auth required.** All fields optional.
 
@@ -438,7 +440,7 @@ Update a group. **Auth required.** All fields optional.
 
 ---
 
-### `DELETE /groups/{group_id}`
+### `DELETE /api/groups/{group_id}`
 
 Delete a group. **Auth required.** Only the group creator can delete. Memberships, expenses and splits of the group are removed by foreign key cascades.
 
@@ -452,7 +454,7 @@ Delete a group. **Auth required.** Only the group creator can delete. Membership
 
 ## Group Members
 
-### `POST /groups/{group_id}/members`
+### `POST /api/groups/{group_id}/members`
 
 Add a member to a group. **Auth required.** Any authenticated user may add; the added user must exist. Re-adding a previously removed member **reactivates** the original membership (soft delete).
 
@@ -472,7 +474,7 @@ Add a member to a group. **Auth required.** Any authenticated user may add; the 
 
 ---
 
-### `DELETE /groups/{group_id}/members/{user_id}`
+### `DELETE /api/groups/{group_id}/members/{user_id}`
 
 Remove a member from a group. **Auth required.** Only the group creator can remove members; the creator themselves cannot be removed. Removal is a soft delete (`is_active = 0`).
 
@@ -544,7 +546,7 @@ Expense object shape (with stored splits):
 }
 ```
 
-### `POST /expenses`
+### `POST /api/expenses`
 
 Create an expense. **Auth required.** The `paid_by` field is **always the authenticated user** and must be an active member of the group.
 
@@ -640,13 +642,13 @@ Create an expense. **Auth required.** The `paid_by` field is **always the authen
 
 ---
 
-### `GET /expenses/group/{group_id}`
+### `GET /api/expenses/group/{group_id}`
 
 List a group's **active** expenses (with splits). **Auth required.** → `200 OK` with a JSON array.
 
 ---
 
-### `GET /expenses/{expense_id}`
+### `GET /api/expenses/{expense_id}`
 
 Get a single expense with splits. **Auth required.**
 
@@ -655,7 +657,7 @@ Get a single expense with splits. **Auth required.**
 
 ---
 
-### `PUT /expenses/{expense_id}`
+### `PUT /api/expenses/{expense_id}`
 
 Update an expense. **Auth required.** All fields optional. Note: `group_id`, `category_id` and `paid_by` are **immutable**, and updating `amount` or `split_type` does **not** recompute the stored splits.
 
@@ -680,7 +682,7 @@ Update an expense. **Auth required.** All fields optional. Note: `group_id`, `ca
 
 ---
 
-### `DELETE /expenses/{expense_id}`
+### `DELETE /api/expenses/{expense_id}`
 
 Delete an expense and its splits. **Auth required.**
 
@@ -702,7 +704,7 @@ net(user) = paid in expenses + paid in settlements
 
 All values are rounded to two decimals. `simplified_settlements` is the minimal set of transfers that settles all group debt (greedy max-debtor/max-creditor matching).
 
-### `GET /balances/group/{group_id}`
+### `GET /api/balances/group/{group_id}`
 
 Get raw balances and simplified settlements for a group. **Auth required.**
 
@@ -749,7 +751,7 @@ Get raw balances and simplified settlements for a group. **Auth required.**
 
 ---
 
-### `GET /balances/me`
+### `GET /api/balances/me`
 
 Get balances across all groups for the current user. **Auth required.**
 
@@ -798,13 +800,13 @@ Settlement object shape:
 }
 ```
 
-### `GET /settlements/group/{group_id}`
+### `GET /api/settlements/group/{group_id}`
 
 List a group's settlements, most recent first. **Auth required.** → `200 OK` with a JSON array.
 
 ---
 
-### `POST /settlements`
+### `POST /api/settlements`
 
 Record a settlement. **Auth required.** The `paid_by` field is **always the authenticated user**; both payer and recipient must be active members of the group.
 
@@ -839,7 +841,7 @@ Record a settlement. **Auth required.** The `paid_by` field is **always the auth
 
 ---
 
-### `DELETE /settlements/{settlement_id}`
+### `DELETE /api/settlements/{settlement_id}`
 
 Delete a settlement. **Auth required.** Only the payer can delete.
 
@@ -898,34 +900,34 @@ Errors are returned as JSON with an `error` field:
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/auth/register` | ❌ | Register user |
-| POST | `/auth/login` | ❌ | Login, get tokens |
-| POST | `/auth/refresh` | ❌ | Refresh tokens |
-| GET | `/auth/me` | ✅ | Current user |
-| GET | `/users` | ✅ | List users |
-| GET | `/users/{id}` | ✅ | Get user |
-| POST | `/users` | ❌ | Create user |
-| PUT | `/users/{id}` | ✅ | Update user |
-| DELETE | `/users/{id}` | ✅ | Delete user |
-| POST | `/categories` | ✅ | Create category (group-scoped) |
-| GET | `/categories/{group_id}` | ✅ | List group categories |
-| GET | `/categories/{group_id}/{id}` | ✅ | Get category |
-| PUT | `/categories/{group_id}/{id}` | ✅ | Update category |
-| DELETE | `/categories/{group_id}/{id}` | ✅ | Delete category |
-| GET | `/groups` | ✅ | List my groups |
-| GET | `/groups/{id}` | ✅ | Get group |
-| POST | `/groups` | ✅ | Create group |
-| PUT | `/groups/{id}` | ✅ | Update group |
-| DELETE | `/groups/{id}` | ✅ | Delete group |
-| POST | `/groups/{group_id}/members` | ✅ | Add member |
-| DELETE | `/groups/{group_id}/members/{user_id}` | ✅ | Remove member |
-| POST | `/expenses` | ✅ | Create expense (splits computed) |
-| GET | `/expenses/group/{group_id}` | ✅ | List group expenses |
-| GET | `/expenses/{id}` | ✅ | Get expense |
-| PUT | `/expenses/{id}` | ✅ | Update expense |
-| DELETE | `/expenses/{id}` | ✅ | Delete expense |
-| GET | `/balances/group/{group_id}` | ✅ | Group balances |
-| GET | `/balances/me` | ✅ | My balances |
-| POST | `/settlements` | ✅ | Record settlement |
-| GET | `/settlements/group/{group_id}` | ✅ | List settlements |
-| DELETE | `/settlements/{id}` | ✅ | Delete settlement |
+| POST | `/api/auth/register` | ❌ | Register user |
+| POST | `/api/auth/login` | ❌ | Login, get tokens |
+| POST | `/api/auth/refresh` | ❌ | Refresh tokens |
+| GET | `/api/auth/me` | ✅ | Current user |
+| GET | `/api/users` | ✅ | List users |
+| GET | `/api/users/{id}` | ✅ | Get user |
+| POST | `/api/users` | ❌ | Create user |
+| PUT | `/api/users/{id}` | ✅ | Update user |
+| DELETE | `/api/users/{id}` | ✅ | Delete user |
+| POST | `/api/categories` | ✅ | Create category (group-scoped) |
+| GET | `/api/categories/{group_id}` | ✅ | List group categories |
+| GET | `/api/categories/{group_id}/{id}` | ✅ | Get category |
+| PUT | `/api/categories/{group_id}/{id}` | ✅ | Update category |
+| DELETE | `/api/categories/{group_id}/{id}` | ✅ | Delete category |
+| GET | `/api/groups` | ✅ | List my groups |
+| GET | `/api/groups/{id}` | ✅ | Get group |
+| POST | `/api/groups` | ✅ | Create group |
+| PUT | `/api/groups/{id}` | ✅ | Update group |
+| DELETE | `/api/groups/{id}` | ✅ | Delete group |
+| POST | `/api/groups/{group_id}/members` | ✅ | Add member |
+| DELETE | `/api/groups/{group_id}/members/{user_id}` | ✅ | Remove member |
+| POST | `/api/expenses` | ✅ | Create expense (splits computed) |
+| GET | `/api/expenses/group/{group_id}` | ✅ | List group expenses |
+| GET | `/api/expenses/{id}` | ✅ | Get expense |
+| PUT | `/api/expenses/{id}` | ✅ | Update expense |
+| DELETE | `/api/expenses/{id}` | ✅ | Delete expense |
+| GET | `/api/balances/group/{group_id}` | ✅ | Group balances |
+| GET | `/api/balances/me` | ✅ | My balances |
+| POST | `/api/settlements` | ✅ | Record settlement |
+| GET | `/api/settlements/group/{group_id}` | ✅ | List settlements |
+| DELETE | `/api/settlements/{id}` | ✅ | Delete settlement |
