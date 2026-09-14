@@ -34,6 +34,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Name          string `json:"name"`
 		CreatedBy     string `json:"created_by"`
 		SimplifyDebts *bool  `json:"simplify_debts"`
+		Currency      string `json:"currency"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		response.WriteError(w, http.StatusBadRequest, "invalid request body")
@@ -53,6 +54,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Name:          input.Name,
 		CreatedBy:     input.CreatedBy,
 		SimplifyDebts: simplifyDebts,
+		Currency:      input.Currency,
 	})
 	if err != nil {
 		if errors.Is(err, ErrNameRequired) || errors.Is(err, ErrCreatorRequired) {
@@ -97,6 +99,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Name          *string `json:"name"`
 		SimplifyDebts *bool   `json:"simplify_debts"`
+		Currency      *string `json:"currency"`
 		IsActive      *bool   `json:"is_active"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -119,6 +122,9 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if input.SimplifyDebts != nil {
 		existing.SimplifyDebts = *input.SimplifyDebts
+	}
+	if input.Currency != nil {
+		existing.Currency = *input.Currency
 	}
 	if input.IsActive != nil {
 		existing.IsActive = *input.IsActive

@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const groupColumns = `id, name, created_by, simplify_debts, is_active, created_at, updated_at`
+const groupColumns = `id, name, created_by, simplify_debts, currency, is_active, created_at, updated_at`
 
 // DBStore implements GroupStore using a SQLite database.
 type DBStore struct {
@@ -31,6 +31,7 @@ func (s *DBStore) InitSchema() error {
 		name TEXT NOT NULL,
 		created_by TEXT NOT NULL,
 		simplify_debts INTEGER NOT NULL DEFAULT 1,
+		currency TEXT NOT NULL DEFAULT 'INR',
 		is_active INTEGER NOT NULL DEFAULT 1,
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
@@ -61,7 +62,7 @@ func scanGroup(scanner rowScanner) (Group, error) {
 		createdStr, updatedStr   string
 	)
 
-	if err := scanner.Scan(&g.ID, &g.Name, &g.CreatedBy, &simplifyInt, &isActiveInt, &createdStr, &updatedStr); err != nil {
+	if err := scanner.Scan(&g.ID, &g.Name, &g.CreatedBy, &simplifyInt, &g.Currency, &isActiveInt, &createdStr, &updatedStr); err != nil {
 		return Group{}, err
 	}
 	g.SimplifyDebts = util.IntToBool(simplifyInt)
@@ -86,11 +87,12 @@ func (s *DBStore) Create(g Group) (Group, error) {
 	formattedTS := now.Format(time.RFC3339)
 
 	_, err := s.db.Exec(
-		`INSERT INTO groups (id, name, created_by, simplify_debts, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO groups (id, name, created_by, simplify_debts, currency, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		g.ID,
 		g.Name,
 		g.CreatedBy,
 		util.BoolToInt(g.SimplifyDebts),
+		g.Currency,
 		util.BoolToInt(g.IsActive),
 		formattedTS,
 		formattedTS,
@@ -144,9 +146,10 @@ func (s *DBStore) Update(id string, g Group) (Group, error) {
 	}
 
 	_, err := s.db.Exec(
-		`UPDATE groups SET name = ?, simplify_debts = ?, is_active = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE groups SET name = ?, simplify_debts = ?, currency = ?, is_active = ?, updated_at = ? WHERE id = ?`,
 		g.Name,
 		util.BoolToInt(g.SimplifyDebts),
+		g.Currency,
 		util.BoolToInt(g.IsActive),
 		time.Now().Format(time.RFC3339),
 		id,

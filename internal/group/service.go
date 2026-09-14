@@ -34,6 +34,9 @@ func (s *Service) Create(g Group) (Group, error) {
 	if g.CreatedBy == "" {
 		return Group{}, ErrCreatorRequired
 	}
+	if g.Currency == "" {
+		g.Currency = "INR"
+	}
 	g.IsActive = true
 	return s.store.Create(g)
 }
