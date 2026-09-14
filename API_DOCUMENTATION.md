@@ -1,6 +1,6 @@
 # Expense Manager — API Documentation
 
-Complete reference for the frontend team to integrate with the Expense Manager backend.
+Complete reference for the frontend team to integrate with the Expense Manager backend (Go implementation).
 
 ---
 
@@ -12,11 +12,12 @@ Complete reference for the frontend team to integrate with the Expense Manager b
 4. [Users](#users)
 5. [Categories](#categories)
 6. [Groups](#groups)
-7. [Expenses](#expenses)
-8. [Balances](#balances)
-9. [Settlements](#settlements)
-10. [Data Types & Conventions](#data-types--conventions)
-11. [Error Responses](#error-responses)
+7. [Group Members](#group-members)
+8. [Expenses](#expenses)
+9. [Balances](#balances)
+10. [Settlements](#settlements)
+11. [Data Types & Conventions](#data-types--conventions)
+12. [Error Responses](#error-responses)
 
 ---
 
@@ -24,13 +25,14 @@ Complete reference for the frontend team to integrate with the Expense Manager b
 
 | Item | Value |
 |------|-------|
-| Base URL | `http://<host>:<port>` (e.g. `http://localhost:8000`) |
+| Base URL | `http://<host>:8080` (e.g. `http://localhost:8080`) |
 | Content Type | `application/json` |
 | Authentication | Bearer JWT (see [Authentication](#authentication)) |
-| CORS | All origins allowed (`*`) |
-| Interactive Docs | `/docs` (Swagger UI), `/redoc` (ReDoc) |
+| Health check | `GET /health` |
 
-All request/response bodies are JSON. IDs are UUIDs serialized as strings. Decimal amounts are serialized as strings (e.g. `"100.50"`).
+All request/response bodies are JSON. IDs are UUIDs serialized as strings. Monetary amounts are JSON **numbers** rounded to two decimals (e.g. `150.5`, `33.34`). Datetimes are RFC 3339 strings.
+
+Routes have **no `/api` prefix** — e.g. `POST /auth/login`, `GET /groups`.
 
 ---
 
@@ -53,20 +55,21 @@ Authorization: Bearer <access_token>
 
 1. Register or login to get `access_token` + `refresh_token`.
 2. Send `access_token` as Bearer token on protected requests.
-3. When the access token expires, call `POST /api/auth/refresh` with the `refresh_token` to get a new pair.
+3. When the access token expires, call `POST /auth/refresh` with the `refresh_token` to get a new pair.
 
 **Public endpoints (no auth required):**
-- `POST /api/auth/register`
-- `POST /api/auth/login`
-- `POST /api/auth/refresh`
+- `POST /auth/register`
+- `POST /auth/login`
+- `POST /auth/refresh`
+- `POST /users`
 
-All other endpoints require a valid access token.
+All other endpoints require a valid access token. The signing secret is read from the `JWT_SECRET` environment variable (a development default with a startup warning is used when unset).
 
 ---
 
 ## Auth Endpoints
 
-### `POST /api/auth/register`
+### `POST /auth/register`
 
 Register a new user. **No auth required.**
 
@@ -82,7 +85,7 @@ Register a new user. **No auth required.**
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| `email` | string | ✅ | Valid email format |
+| `email` | string | ✅ | Valid email format, unique |
 | `password` | string | ✅ | Plain text (hashed server-side) |
 | `full_name` | string | ❌ | Optional |
 
@@ -100,11 +103,13 @@ Register a new user. **No auth required.**
 ```
 
 **Errors:**
-- `400` — `Email already registered`
+- `400` — `email already registered`
+- `400` — `email must be a valid email address`
+- `400` — `email is required` / `password is required`
 
 ---
 
-### `POST /api/auth/login`
+### `POST /auth/login`
 
 Authenticate and receive tokens. **No auth required.**
 
@@ -117,11 +122,6 @@ Authenticate and receive tokens. **No auth required.**
 }
 ```
 
-| Field | Type | Required |
-|-------|------|----------|
-| `email` | string | ✅ |
-| `password` | string | ✅ |
-
 **Response `200 OK`:**
 
 ```json
@@ -133,12 +133,12 @@ Authenticate and receive tokens. **No auth required.**
 ```
 
 **Errors:**
-- `401` — `Invalid email or password`
-- `403` — `Account is deactivated`
+- `401` — `invalid email or password`
+- `403` — `account is deactivated`
 
 ---
 
-### `POST /api/auth/refresh`
+### `POST /auth/refresh`
 
 Exchange a refresh token for a new token pair. **No auth required.**
 
@@ -150,34 +150,31 @@ Exchange a refresh token for a new token pair. **No auth required.**
 }
 ```
 
-| Field | Type | Required |
-|-------|------|----------|
-| `refresh_token` | string | ✅ |
-
-**Response `200 OK`:**
-
-```json
-{
-  "access_token": "eyJhbGciOi...",
-  "refresh_token": "eyJhbGciOi...",
-  "token_type": "bearer"
-}
-```
+**Response `200 OK`:** Same token pair shape as login.
 
 **Errors:**
-- `401` — `Invalid token type` / `Invalid token` / `Invalid or expired refresh token` / `User not found or inactive`
+- `401` — `invalid token` / `invalid or expired token` / `invalid token type` (an access token was supplied) / `User not found or inactive`
 
 ---
 
-### `GET /api/auth/me`
+### `GET /auth/me`
 
 Get the currently authenticated user. **Auth required.**
 
-**Response `200 OK`:**
+**Response `200 OK`:** Single user object (see register response).
+
+**Errors:**
+- `401` — `User not found`
+
+---
+
+## Users
+
+User object shape (password is never serialized):
 
 ```json
 {
-  "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "id": "3fa85f64-...",
   "email": "user@example.com",
   "full_name": "John Doe",
   "is_active": true,
@@ -186,84 +183,30 @@ Get the currently authenticated user. **Auth required.**
 }
 ```
 
----
+### `GET /users`
 
-## Users
-
-### `GET /api/users/`
-
-List all users. **Auth required.**
-
-**Response `200 OK`:**
-
-```json
-[
-  {
-    "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "email": "user@example.com",
-    "full_name": "John Doe",
-    "is_active": true,
-    "created_at": "2026-08-16T00:00:00Z",
-    "updated_at": null
-  }
-]
-```
+List all users. **Auth required.** → `200 OK` with a JSON array of user objects.
 
 ---
 
-### `GET /api/users/{user_id}`
+### `GET /users/{user_id}`
 
 Get a single user by ID. **Auth required.**
 
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `user_id` | UUID | User ID |
-
-**Response `200 OK`:** Same shape as a single user object (see above).
-
 **Errors:**
-- `404` — `User not found`
+- `404` — `user not found`
 
 ---
 
-### `POST /api/users/`
+### `POST /users`
 
-Create a user. **No auth required.**
-
-**Request Body:**
-
-```json
-{
-  "email": "user@example.com",
-  "password": "secret123",
-  "full_name": "John Doe"
-}
-```
-
-| Field | Type | Required |
-|-------|------|----------|
-| `email` | string | ✅ |
-| `password` | string | ✅ |
-| `full_name` | string | ❌ |
-
-**Response `201 Created`:** Single user object.
-
-**Errors:**
-- `400` — `Email already registered`
+Create a user. **No auth required.** Same body and behavior as `POST /auth/register`.
 
 ---
 
-### `PUT /api/users/{user_id}`
+### `PUT /users/{user_id}`
 
 Update a user. **Auth required.** All fields optional; only provided fields are updated.
-
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `user_id` | UUID | User ID |
 
 **Request Body:**
 
@@ -280,108 +223,86 @@ Update a user. **Auth required.** All fields optional; only provided fields are 
 |-------|------|----------|-------|
 | `email` | string | ❌ | Must be unique |
 | `full_name` | string | ❌ | |
-| `password` | string | ❌ | Will be re-hashed |
+| `password` | string | ❌ | Re-hashed server-side |
 | `is_active` | boolean | ❌ | |
 
-**Response `200 OK`:** Updated user object.
+**Response `200 OK`:** Updated user object (`updated_at` is set).
 
 **Errors:**
-- `404` — `User not found`
-- `400` — `Email already registered`
+- `404` — `user not found`
+- `400` — `email already registered` / `email must be a valid email address`
 
 ---
 
-### `DELETE /api/users/{user_id}`
+### `DELETE /users/{user_id}`
 
 Delete a user. **Auth required.**
 
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `user_id` | UUID | User ID |
-
-**Response `200 OK`:**
-
-```json
-"User deleted successfully!"
-```
+**Response `200 OK`:** `"User deleted successfully!"`
 
 **Errors:**
-- `404` — `User not found`
+- `404` — `user not found`
 
 ---
 
 ## Categories
 
-### `GET /api/categories/`
+Categories are **group-scoped**: every route carries a `{group_id}`, and category names are unique per group (`UNIQUE(group_id, name)`). Deleting a category that has expenses is blocked by a foreign key restriction.
 
-List all categories. **Auth required.**
-
-**Response `200 OK`:**
+Category object shape:
 
 ```json
-[
-  {
-    "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "name": "Food",
-    "is_active": true,
-    "created_at": "2026-08-16T00:00:00Z"
-  }
-]
+{
+  "id": "3fa85f64-...",
+  "group_id": "3fa85f64-...",
+  "name": "Food",
+  "is_active": true,
+  "created_at": "2026-08-16T00:00:00Z",
+  "updated_at": "2026-08-16T00:00:00Z"
+}
 ```
 
----
+### `POST /categories`
 
-### `GET /api/categories/{category_id}`
-
-Get a single category. **Auth required.**
-
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `category_id` | UUID | Category ID |
-
-**Response `200 OK`:** Single category object.
-
-**Errors:**
-- `404` — `Category not found`
-
----
-
-### `POST /api/categories/`
-
-Create a category. **Auth required.**
+Create a category in a group. **Auth required.**
 
 **Request Body:**
 
 ```json
 {
+  "group_id": "3fa85f64-...",
   "name": "Food"
 }
 ```
 
-| Field | Type | Required |
-|-------|------|----------|
-| `name` | string | ✅ |
-
 **Response `201 Created`:** Single category object.
 
 **Errors:**
+- `400` — `group_id and name are required`
 - `400` — `Category already exists!`
+- `404` — `group not found`
 
 ---
 
-### `PUT /api/categories/{category_id}`
+### `GET /categories/{group_id}`
 
-Update a category. **Auth required.** All fields optional.
+List a group's categories. **Auth required.** → `200 OK` with a JSON array.
 
-**Path Parameters:**
+---
 
-| Param | Type | Description |
-|-------|------|-------------|
-| `category_id` | UUID | Category ID |
+### `GET /categories/{group_id}/{id}`
+
+Get a single category. **Auth required.**
+
+**Errors:**
+- `404` — `category not found`
+- `403` — `invalid access` (category belongs to a different group)
+
+---
+
+### `PUT /categories/{group_id}/{id}`
+
+Update a category. **Auth required.**
 
 **Request Body:**
 
@@ -392,107 +313,86 @@ Update a category. **Auth required.** All fields optional.
 }
 ```
 
-| Field | Type | Required |
-|-------|------|----------|
-| `name` | string | ❌ |
-| `is_active` | boolean | ❌ |
+Both fields are required.
 
 **Response `200 OK`:** Updated category object.
 
 **Errors:**
-- `404` — `Category not found`
+- `400` — `name and is_active are required` / `Category already exists!`
+- `404` — `category not found`
 
 ---
 
-### `DELETE /api/categories/{category_id}`
+### `DELETE /categories/{group_id}/{id}`
 
 Delete a category. **Auth required.**
 
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `category_id` | UUID | Category ID |
-
-**Response `200 OK`:**
-
-```json
-"Category Food deleted successfully!"
-```
+**Response `200 OK`:** `"Category Food deleted successfully!"`
 
 **Errors:**
-- `404` — `Category not found`
+- `404` — `category not found`
 
 ---
 
 ## Groups
 
-### `GET /api/groups/`
-
-List groups the current user is an active member of. **Auth required.**
-
-**Response `200 OK`:**
+Group object shape (members are included in all group responses):
 
 ```json
-[
-  {
-    "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "name": "Trip to Goa",
-    "created_by": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "simplify_debts": true,
-    "is_active": true,
-    "created_at": "2026-08-16T00:00:00Z",
-    "updated_at": null,
-    "members": [
-      {
-        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-        "user_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-        "user": {
-          "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-          "email": "user@example.com",
-          "full_name": "John Doe"
-        },
-        "joined_at": "2026-08-16T00:00:00Z",
-        "is_active": true
-      }
-    ]
-  }
-]
+{
+  "id": "3fa85f64-...",
+  "name": "Trip to Goa",
+  "created_by": "3fa85f64-...",
+  "simplify_debts": true,
+  "currency": "INR",
+  "is_active": true,
+  "created_at": "2026-08-16T00:00:00Z",
+  "updated_at": "2026-08-16T00:00:00Z",
+  "members": [
+    {
+      "id": "membership-uuid",
+      "user_id": "3fa85f64-...",
+      "user": {
+        "id": "3fa85f64-...",
+        "email": "user@example.com",
+        "full_name": "John Doe"
+      },
+      "joined_at": "2026-08-16T00:00:00Z",
+      "is_active": true
+    }
+  ]
+}
 ```
+
+### `GET /groups`
+
+List groups the current user is an **active member** of. **Auth required.**
+
+**Response `200 OK`:** JSON array of group objects with members.
 
 ---
 
-### `GET /api/groups/{group_id}`
+### `GET /groups/{group_id}`
 
 Get a single group with members. **Auth required.**
 
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `group_id` | UUID | Group ID |
-
-**Response `200 OK`:** Single group object (see above).
-
 **Errors:**
-- `404` — `Group not found`
+- `404` — `group not found`
 
 ---
 
-### `POST /api/groups/`
+### `POST /groups`
 
-Create a group. **Auth required.** The creator is automatically added as a member.
+Create a group. **Auth required.** The **authenticated user** is the creator and is automatically added as a member (do not send `created_by` — it comes from the token). The group, the creator membership and any extra members are created in one transaction.
 
 **Request Body:**
 
 ```json
 {
   "name": "Trip to Goa",
-  "member_ids": [
-    "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "4fa85f64-5717-4562-b3fc-2c963f66afa6"
-  ],
-  "simplify_debts": true
+  "member_ids": ["3fa85f64-...", "4fa85f64-..."],
+  "simplify_debts": true,
+  "currency": "INR"
 }
 ```
 
@@ -501,25 +401,21 @@ Create a group. **Auth required.** The creator is automatically added as a membe
 | `name` | string | ✅ | — | |
 | `member_ids` | UUID[] | ❌ | `[]` | Other members to add. Creator must NOT be included. |
 | `simplify_debts` | boolean | ❌ | `true` | Enable debt simplification |
+| `currency` | string | ❌ | `"INR"` | Group default currency |
 
 **Response `201 Created`:** Single group object with members.
 
 **Errors:**
-- `400` — `Duplicate member ids provided`
-- `400` — `Creator is added automatically and must not be in member_ids`
-- `404` — `One or more members not found`
+- `400` — `name is required`
+- `400` — `creator is added automatically and must not be in member_ids`
+- `400` — `duplicate member ids provided`
+- `404` — `one or more members not found`
 
 ---
 
-### `PUT /api/groups/{group_id}`
+### `PUT /groups/{group_id}`
 
 Update a group. **Auth required.** All fields optional.
-
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `group_id` | UUID | Group ID |
 
 **Request Body:**
 
@@ -527,98 +423,63 @@ Update a group. **Auth required.** All fields optional.
 {
   "name": "Goa Trip 2026",
   "simplify_debts": false,
+  "currency": "USD",
   "is_active": true
 }
 ```
 
-| Field | Type | Required |
-|-------|------|----------|
-| `name` | string | ❌ |
-| `simplify_debts` | boolean | ❌ |
-| `is_active` | boolean | ❌ |
-
-**Response `200 OK`:** Updated group object.
+**Response `200 OK`:** Updated group object with members.
 
 **Errors:**
-- `404` — `Group not found`
+- `400` — `name is required`
+- `404` — `group not found`
 
 ---
 
-### `DELETE /api/groups/{group_id}`
+### `DELETE /groups/{group_id}`
 
-Delete a group. **Auth required.** Only the group creator can delete.
+Delete a group. **Auth required.** Only the group creator can delete. Memberships, expenses and splits of the group are removed by foreign key cascades.
 
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `group_id` | UUID | Group ID |
-
-**Response `200 OK`:**
-
-```json
-"Group 'Trip to Goa' deleted successfully!"
-```
+**Response `200 OK`:** `"Group 'Trip to Goa' deleted successfully!"`
 
 **Errors:**
-- `404` — `Group not found`
-- `403` — `Only group creator can delete the group`
+- `404` — `group not found`
+- `403` — `only group creator can delete the group`
 
 ---
 
-### `POST /api/groups/{group_id}/members`
+## Group Members
 
-Add a member to a group. **Auth required.**
+### `POST /groups/{group_id}/members`
 
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `group_id` | UUID | Group ID |
+Add a member to a group. **Auth required.** Any authenticated user may add; the added user must exist. Re-adding a previously removed member **reactivates** the original membership (soft delete).
 
 **Request Body:**
 
 ```json
 {
-  "user_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+  "user_id": "3fa85f64-..."
 }
 ```
-
-| Field | Type | Required |
-|-------|------|----------|
-| `user_id` | UUID | ✅ |
 
 **Response `200 OK`:** Updated group object with members.
 
 **Errors:**
-- `404` — `Group not found`
-- `404` — `User not found`
-- `400` — `User is already a member of this group`
+- `400` — `user_id is required` / `User is already a member of this group`
+- `404` — `group not found` / `user not found`
 
 ---
 
-### `DELETE /api/groups/{group_id}/members/{user_id}`
+### `DELETE /groups/{group_id}/members/{user_id}`
 
-Remove a member from a group. **Auth required.** Only the group creator can remove members.
+Remove a member from a group. **Auth required.** Only the group creator can remove members; the creator themselves cannot be removed. Removal is a soft delete (`is_active = 0`).
 
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `group_id` | UUID | Group ID |
-| `user_id` | UUID | Member user ID to remove |
-
-**Response `200 OK`:**
-
-```json
-"Member removed successfully!"
-```
+**Response `200 OK`:** `"Member removed successfully!"`
 
 **Errors:**
-- `404` — `Group not found`
-- `403` — `Only group creator can remove members`
+- `404` — `group not found` / `Member not found in group`
+- `403` — `only group creator can remove members`
 - `400` — `Cannot remove the group creator`
-- `404` — `Member not found in group`
 
 ---
 
@@ -626,21 +487,21 @@ Remove a member from a group. **Auth required.** Only the group creator can remo
 
 ### Split Types
 
-Expenses support four split strategies, specified via the `split_type` field:
+Expenses support four split strategies, specified via the `split_type` field. Splits are computed **server-side** and stored with the expense in one transaction. All amounts are rounded to two decimals; any rounding remainder is assigned to the first split.
 
 | `split_type` | Description | `splits` array required? |
 |--------------|-------------|--------------------------|
-| `EQUAL` | Split evenly among all active group members | ❌ (ignored) |
-| `EXACT` | Each split specifies an exact `amount` | ✅ |
-| `PERCENTAGE` | Each split specifies a `percentage` (must sum to 100) | ✅ |
-| `SHARES` | Each split specifies a `shares` count (proportional) | ✅ |
+| `EQUAL` | Split evenly among all **active** group members | ❌ (ignored) |
+| `EXACT` | Each split specifies an exact `amount`; the sum must equal the total | ✅ |
+| `PERCENTAGE` | Each split specifies a `percentage`; must sum to 100 | ✅ |
+| `SHARES` | Each split specifies a `shares` count; amounts are proportional | ✅ |
 
-The `splits` array entries have this shape:
+The `splits` request entries have this shape:
 
 ```json
 {
-  "user_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "amount": "50.00",
+  "user_id": "3fa85f64-...",
+  "amount": 50.0,
   "percentage": 25.0,
   "shares": 1
 }
@@ -648,83 +509,50 @@ The `splits` array entries have this shape:
 
 | Field | Type | Used by |
 |-------|------|---------|
-| `user_id` | UUID | All non-EQUAL types |
-| `amount` | decimal | `EXACT` |
-| `percentage` | float | `PERCENTAGE` |
-| `shares` | integer | `SHARES` |
+| `user_id` | UUID | All non-EQUAL types; must be an active group member |
+| `amount` | number | `EXACT` |
+| `percentage` | number | `PERCENTAGE` |
+| `shares` | integer | `SHARES` (must be > 0) |
 
----
-
-### `GET /api/expenses/group/{group_id}`
-
-List active expenses for a group. **Auth required.**
-
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `group_id` | UUID | Group ID |
-
-**Response `200 OK`:**
+Expense object shape (with stored splits):
 
 ```json
-[
-  {
-    "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "group_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "paid_by": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "category_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "amount": "150.00",
-    "description": "Dinner",
-    "currency": "INR",
-    "split_type": "EQUAL",
-    "expense_date": "2026-08-16T00:00:00Z",
-    "is_active": true,
-    "created_at": "2026-08-16T00:00:00Z",
-    "updated_at": null,
-    "splits": [
-      {
-        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-        "user_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-        "amount": "50.00",
-        "percentage": null,
-        "shares": null
-      }
-    ]
-  }
-]
+{
+  "id": "3fa85f64-...",
+  "group_id": "3fa85f64-...",
+  "category_id": "3fa85f64-...",
+  "paid_by": "3fa85f64-...",
+  "amount": 150.0,
+  "description": "Dinner",
+  "currency": "INR",
+  "split_type": "EQUAL",
+  "expense_date": "2026-08-16T00:00:00Z",
+  "is_active": true,
+  "created_at": "2026-08-16T00:00:00Z",
+  "updated_at": "2026-08-16T00:00:00Z",
+  "splits": [
+    {
+      "id": "split-uuid",
+      "user_id": "3fa85f64-...",
+      "amount": 50.0,
+      "percentage": null,
+      "shares": null
+    }
+  ]
+}
 ```
 
----
+### `POST /expenses`
 
-### `GET /api/expenses/{expense_id}`
-
-Get a single expense. **Auth required.**
-
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `expense_id` | UUID | Expense ID |
-
-**Response `200 OK`:** Single expense object (see above).
-
-**Errors:**
-- `404` — `Expense not found`
-
----
-
-### `POST /api/expenses/`
-
-Create an expense. **Auth required.** The `paid_by` field is always set to the authenticated user. Splits are computed server-side based on `split_type`.
+Create an expense. **Auth required.** The `paid_by` field is **always the authenticated user** and must be an active member of the group.
 
 **Request Body (EQUAL split):**
 
 ```json
 {
-  "group_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "category_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "amount": "150.00",
+  "group_id": "3fa85f64-...",
+  "category_id": "3fa85f64-...",
+  "amount": 150.0,
   "description": "Dinner",
   "currency": "INR",
   "split_type": "EQUAL",
@@ -737,16 +565,15 @@ Create an expense. **Auth required.** The `paid_by` field is always set to the a
 
 ```json
 {
-  "group_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "category_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "amount": "150.00",
+  "group_id": "3fa85f64-...",
+  "category_id": "3fa85f64-...",
+  "amount": 150.0,
   "description": "Dinner",
-  "currency": "INR",
-  "split_type": "EXACT",
   "expense_date": "2026-08-16T00:00:00Z",
+  "split_type": "EXACT",
   "splits": [
-    { "user_id": "aaa...", "amount": "100.00" },
-    { "user_id": "bbb...", "amount": "50.00" }
+    { "user_id": "aaa...", "amount": 100.0 },
+    { "user_id": "bbb...", "amount": 50.0 }
   ]
 }
 ```
@@ -755,13 +582,12 @@ Create an expense. **Auth required.** The `paid_by` field is always set to the a
 
 ```json
 {
-  "group_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "category_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "amount": "150.00",
+  "group_id": "3fa85f64-...",
+  "category_id": "3fa85f64-...",
+  "amount": 150.0,
   "description": "Dinner",
-  "currency": "INR",
-  "split_type": "PERCENTAGE",
   "expense_date": "2026-08-16T00:00:00Z",
+  "split_type": "PERCENTAGE",
   "splits": [
     { "user_id": "aaa...", "percentage": 60.0 },
     { "user_id": "bbb...", "percentage": 40.0 }
@@ -773,13 +599,12 @@ Create an expense. **Auth required.** The `paid_by` field is always set to the a
 
 ```json
 {
-  "group_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "category_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "amount": "150.00",
+  "group_id": "3fa85f64-...",
+  "category_id": "3fa85f64-...",
+  "amount": 150.0,
   "description": "Dinner",
-  "currency": "INR",
-  "split_type": "SHARES",
   "expense_date": "2026-08-16T00:00:00Z",
+  "split_type": "SHARES",
   "splits": [
     { "user_id": "aaa...", "shares": 2 },
     { "user_id": "bbb...", "shares": 1 }
@@ -789,41 +614,54 @@ Create an expense. **Auth required.** The `paid_by` field is always set to the a
 
 | Field | Type | Required | Default | Notes |
 |-------|------|----------|---------|-------|
-| `group_id` | UUID | ✅ | — | |
-| `category_id` | UUID | ✅ | — | Must exist |
-| `amount` | decimal | ✅ | — | Must be > 0 |
+| `group_id` | UUID | ✅ | — | Group must exist |
+| `category_id` | UUID | ✅ | — | Must be a category of that group |
+| `amount` | number | ✅ | — | Must be > 0 |
 | `description` | string | ✅ | — | |
 | `currency` | string | ❌ | `"INR"` | |
 | `split_type` | string | ❌ | `"EQUAL"` | `EQUAL`, `EXACT`, `PERCENTAGE`, `SHARES` |
-| `expense_date` | datetime | ✅ | — | |
+| `expense_date` | datetime | ✅ | — | RFC 3339 |
 | `splits` | array | ❌ | `[]` | See split types |
 
 **Response `201 Created`:** Single expense object with computed splits.
 
 **Errors:**
-- `404` — `Group not found`
-- `400` — `Category not found`
+- `400` — `please provide all the required fields [group_id, category_id, amount, description, expense_date]`
+- `400` — `expense_date must be a valid RFC3339 datetime`
+- `400` — `amount must be greater than zero`
+- `400` — `split_type must be one of EQUAL, EXACT, PERCENTAGE, SHARES`
 - `400` — `Group has no members`
-- `400` — Various split validation errors (e.g. `Sum of exact splits (...) must equal total (...)`, `Percentages must sum to 100`, `Total shares must be greater than 0`, `Unknown split type`)
+- `400` — `payer is not an active member of this group` / `split user is not an active member of this group`
+- `400` — `splits are required for this split type` / `duplicate user in splits` / `sum of exact splits must equal total amount` / `percentages must sum to 100` / `total shares must be greater than 0`
+- `400` — `Category not found`
+- `404` — `group not found`
 
 ---
 
-### `PUT /api/expenses/{expense_id}`
+### `GET /expenses/group/{group_id}`
 
-Update an expense. **Auth required.** All fields optional. Note: updating `amount` or `split_type` does NOT recompute splits.
+List a group's **active** expenses (with splits). **Auth required.** → `200 OK` with a JSON array.
 
-**Path Parameters:**
+---
 
-| Param | Type | Description |
-|-------|------|-------------|
-| `expense_id` | UUID | Expense ID |
+### `GET /expenses/{expense_id}`
+
+Get a single expense with splits. **Auth required.**
+
+**Errors:**
+- `404` — `expense not found`
+
+---
+
+### `PUT /expenses/{expense_id}`
+
+Update an expense. **Auth required.** All fields optional. Note: `group_id`, `category_id` and `paid_by` are **immutable**, and updating `amount` or `split_type` does **not** recompute the stored splits.
 
 **Request Body:**
 
 ```json
 {
-  "category_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "amount": "200.00",
+  "amount": 200.0,
   "description": "Updated dinner",
   "currency": "INR",
   "split_type": "EQUAL",
@@ -832,73 +670,56 @@ Update an expense. **Auth required.** All fields optional. Note: updating `amoun
 }
 ```
 
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| `category_id` | UUID | ❌ | Must exist if provided |
-| `amount` | decimal | ❌ | Must be > 0 |
-| `description` | string | ❌ | |
-| `currency` | string | ❌ | |
-| `split_type` | string | ❌ | |
-| `expense_date` | datetime | ❌ | |
-| `is_active` | boolean | ❌ | |
-
-**Response `200 OK`:** Updated expense object.
+**Response `200 OK`:** Updated expense object with splits.
 
 **Errors:**
-- `404` — `Expense not found`
-- `400` — `Category not found`
+- `400` — `amount must be greater than zero` / `expense_date must be a valid RFC3339 datetime` / `split_type must be one of EQUAL, EXACT, PERCENTAGE, SHARES`
+- `404` — `expense not found`
 
 ---
 
-### `DELETE /api/expenses/{expense_id}`
+### `DELETE /expenses/{expense_id}`
 
-Delete an expense. **Auth required.**
+Delete an expense and its splits. **Auth required.**
 
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `expense_id` | UUID | Expense ID |
-
-**Response `200 OK`:**
-
-```json
-"Expense deleted successfully!"
-```
+**Response `200 OK`:** `"Expense deleted successfully!"`
 
 **Errors:**
-- `404` — `Expense not found`
+- `404` — `expense not found`
 
 ---
 
 ## Balances
 
-### `GET /api/balances/group/{group_id}`
+Balances are derived from active expenses, their splits, and settlements:
+
+```
+net(user) = paid in expenses + paid in settlements
+          - owed via splits   - received via settlements
+```
+
+All values are rounded to two decimals. `simplified_settlements` is the minimal set of transfers that settles all group debt (greedy max-debtor/max-creditor matching).
+
+### `GET /balances/group/{group_id}`
 
 Get raw balances and simplified settlements for a group. **Auth required.**
-
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `group_id` | UUID | Group ID |
 
 **Response `200 OK`:**
 
 ```json
 {
-  "group_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "group_id": "3fa85f64-...",
   "group_name": "Trip to Goa",
   "balances": [
     {
-      "user_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "user_id": "3fa85f64-...",
       "email": "user@example.com",
       "full_name": "John Doe",
       "net_balance": 50.0,
       "status": "owed"
     },
     {
-      "user_id": "4fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "user_id": "4fa85f64-...",
       "email": "jane@example.com",
       "full_name": "Jane Doe",
       "net_balance": -50.0,
@@ -907,8 +728,8 @@ Get raw balances and simplified settlements for a group. **Auth required.**
   ],
   "simplified_settlements": [
     {
-      "from_user_id": "4fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "to_user_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "from_user_id": "4fa85f64-...",
+      "to_user_id": "3fa85f64-...",
       "amount": 50.0
     }
   ],
@@ -922,11 +743,11 @@ Get raw balances and simplified settlements for a group. **Auth required.**
 - `settled` — zero balance
 
 **Errors:**
-- `404` — `Group not found`
+- `404` — `group not found`
 
 ---
 
-### `GET /api/balances/me`
+### `GET /balances/me`
 
 Get balances across all groups for the current user. **Auth required.**
 
@@ -934,19 +755,19 @@ Get balances across all groups for the current user. **Auth required.**
 
 ```json
 {
-  "user_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "user_id": "3fa85f64-...",
   "total_owed_to_me": 120.0,
   "total_i_owe": 30.0,
   "net_balance": 90.0,
   "groups": [
     {
-      "group_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "group_id": "3fa85f64-...",
       "group_name": "Trip to Goa",
       "my_net_balance": 50.0,
       "my_settlements": [
         {
-          "from_user_id": "4fa85f64-5717-4562-b3fc-2c963f66afa6",
-          "to_user_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "from_user_id": "4fa85f64-...",
+          "to_user_id": "3fa85f64-...",
           "amount": 50.0
         }
       ]
@@ -959,47 +780,39 @@ Get balances across all groups for the current user. **Auth required.**
 
 ## Settlements
 
-### `GET /api/settlements/group/{group_id}`
-
-List settlements for a group (most recent first). **Auth required.**
-
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `group_id` | UUID | Group ID |
-
-**Response `200 OK`:**
+Settlement object shape:
 
 ```json
-[
-  {
-    "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "group_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "paid_by": "4fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "paid_to": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "amount": "50.00",
-    "payment_method": "cash",
-    "note": "Dinner split",
-    "settled_at": "2026-08-16T00:00:00Z",
-    "created_at": "2026-08-16T00:00:00Z"
-  }
-]
+{
+  "id": "3fa85f64-...",
+  "group_id": "3fa85f64-...",
+  "paid_by": "4fa85f64-...",
+  "paid_to": "3fa85f64-...",
+  "amount": 50.0,
+  "payment_method": "cash",
+  "note": "Dinner split",
+  "settled_at": "2026-08-16T00:00:00Z",
+  "created_at": "2026-08-16T00:00:00Z"
+}
 ```
+
+### `GET /settlements/group/{group_id}`
+
+List a group's settlements, most recent first. **Auth required.** → `200 OK` with a JSON array.
 
 ---
 
-### `POST /api/settlements/`
+### `POST /settlements`
 
-Record a settlement. **Auth required.** The `paid_by` field is always the authenticated user.
+Record a settlement. **Auth required.** The `paid_by` field is **always the authenticated user**; both payer and recipient must be active members of the group.
 
 **Request Body:**
 
 ```json
 {
-  "group_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "paid_to": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "amount": "50.00",
+  "group_id": "3fa85f64-...",
+  "paid_to": "3fa85f64-...",
+  "amount": 50.0,
   "payment_method": "cash",
   "note": "Dinner split"
 }
@@ -1009,38 +822,29 @@ Record a settlement. **Auth required.** The `paid_by` field is always the authen
 |-------|------|----------|---------|-------|
 | `group_id` | UUID | ✅ | — | |
 | `paid_to` | UUID | ✅ | — | Recipient; must be an active group member |
-| `amount` | decimal | ✅ | — | Must be > 0 |
-| `payment_method` | string | ❌ | `"cash"` | |
-| `note` | string | ❌ | `null` | |
+| `amount` | number | ✅ | — | Must be > 0 |
+| `payment_method` | string | ❌ | `"cash"` | `cash`, `bank` or `upi` |
+| `note` | string | ❌ | `""` | |
 
 **Response `201 Created`:** Single settlement object.
 
 **Errors:**
-- `404` — `Group not found`
-- `400` — `Recipient is not a member of this group`
-- `400` — `Cannot settle with yourself`
-- `400` — `Settlement amount must be positive`
+- `400` — `cannot settle with yourself`
+- `400` — `recipient is not a member of this group` / `payer is not a member of this group`
+- `400` — `settlement amount must be positive` / `paid_to is required` / `group_id is required`
+- `400` — `payment_method must be one of cash, bank, upi`
+- `404` — `group not found`
 
 ---
 
-### `DELETE /api/settlements/{settlement_id}`
+### `DELETE /settlements/{settlement_id}`
 
 Delete a settlement. **Auth required.** Only the payer can delete.
 
-**Path Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `settlement_id` | UUID | Settlement ID |
-
-**Response `200 OK`:**
-
-```json
-"Settlement deleted successfully!"
-```
+**Response `200 OK`:** `"Settlement deleted successfully!"`
 
 **Errors:**
-- `404` — `Settlement not found`
+- `404` — `settlement not found`
 - `403` — `Only the payer can delete a settlement`
 
 ---
@@ -1050,20 +854,20 @@ Delete a settlement. **Auth required.** Only the payer can delete.
 | Type | JSON Representation | Notes |
 |------|---------------------|-------|
 | UUID | string | e.g. `"3fa85f64-5717-4562-b3fc-2c963f66afa6"` |
-| Decimal | string | e.g. `"150.00"` — always serialized as string |
-| datetime | ISO 8601 string | e.g. `"2026-08-16T00:00:00Z"` |
+| money | number | e.g. `150.5` — always rounded to two decimals |
+| datetime | string | RFC 3339, e.g. `"2026-08-16T00:00:00Z"` |
 | boolean | boolean | `true` / `false` |
-| float | number | e.g. `50.0` (used in balances) |
+| nullable | `null` | e.g. `percentage`, `shares`, `updated_at` |
 
 ---
 
 ## Error Responses
 
-Errors are returned as JSON with a `detail` field:
+Errors are returned as JSON with an `error` field:
 
 ```json
 {
-  "detail": "Error message here"
+  "error": "Error message here"
 }
 ```
 
@@ -1076,16 +880,15 @@ Errors are returned as JSON with a `detail` field:
 | `400` | Bad request / validation error |
 | `401` | Unauthorized (missing/invalid/expired token) |
 | `403` | Forbidden (insufficient permissions) |
-| `404` | Resource not found |
-| `422` | Request validation error (FastAPI/Pydantic) |
+| `404` | Not found |
+| `500` | Internal server error |
 
 ### Authentication Errors
 
-- `401` — `Invalid token type` (wrong token used)
-- `401` — `Invalid token`
-- `401` — `Invalid or expired token`
-- `401` — `User not found`
-- `403` — `Account is deactivated`
+- `401` — `Invalid token` (missing or malformed header, or bad signature)
+- `401` — `invalid or expired token`
+- `401` — `invalid token type` (e.g. using a refresh token as access token or vice versa)
+- `403` — `account is deactivated` (login only)
 
 ---
 
@@ -1093,34 +896,34 @@ Errors are returned as JSON with a `detail` field:
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/auth/register` | ❌ | Register user |
-| POST | `/api/auth/login` | ❌ | Login, get tokens |
-| POST | `/api/auth/refresh` | ❌ | Refresh tokens |
-| GET | `/api/auth/me` | ✅ | Current user |
-| GET | `/api/users/` | ✅ | List users |
-| GET | `/api/users/{id}` | ✅ | Get user |
-| POST | `/api/users/` | ❌ | Create user |
-| PUT | `/api/users/{id}` | ✅ | Update user |
-| DELETE | `/api/users/{id}` | ✅ | Delete user |
-| GET | `/api/categories/` | ✅ | List categories |
-| GET | `/api/categories/{id}` | ✅ | Get category |
-| POST | `/api/categories/` | ✅ | Create category |
-| PUT | `/api/categories/{id}` | ✅ | Update category |
-| DELETE | `/api/categories/{id}` | ✅ | Delete category |
-| GET | `/api/groups/` | ✅ | List my groups |
-| GET | `/api/groups/{id}` | ✅ | Get group |
-| POST | `/api/groups/` | ✅ | Create group |
-| PUT | `/api/groups/{id}` | ✅ | Update group |
-| DELETE | `/api/groups/{id}` | ✅ | Delete group |
-| POST | `/api/groups/{id}/members` | ✅ | Add member |
-| DELETE | `/api/groups/{id}/members/{user_id}` | ✅ | Remove member |
-| GET | `/api/expenses/group/{group_id}` | ✅ | List group expenses |
-| GET | `/api/expenses/{id}` | ✅ | Get expense |
-| POST | `/api/expenses/` | ✅ | Create expense |
-| PUT | `/api/expenses/{id}` | ✅ | Update expense |
-| DELETE | `/api/expenses/{id}` | ✅ | Delete expense |
-| GET | `/api/balances/group/{group_id}` | ✅ | Group balances |
-| GET | `/api/balances/me` | ✅ | My balances |
-| GET | `/api/settlements/group/{group_id}` | ✅ | List settlements |
-| POST | `/api/settlements/` | ✅ | Record settlement |
-| DELETE | `/api/settlements/{id}` | ✅ | Delete settlement |
+| POST | `/auth/register` | ❌ | Register user |
+| POST | `/auth/login` | ❌ | Login, get tokens |
+| POST | `/auth/refresh` | ❌ | Refresh tokens |
+| GET | `/auth/me` | ✅ | Current user |
+| GET | `/users` | ✅ | List users |
+| GET | `/users/{id}` | ✅ | Get user |
+| POST | `/users` | ❌ | Create user |
+| PUT | `/users/{id}` | ✅ | Update user |
+| DELETE | `/users/{id}` | ✅ | Delete user |
+| POST | `/categories` | ✅ | Create category (group-scoped) |
+| GET | `/categories/{group_id}` | ✅ | List group categories |
+| GET | `/categories/{group_id}/{id}` | ✅ | Get category |
+| PUT | `/categories/{group_id}/{id}` | ✅ | Update category |
+| DELETE | `/categories/{group_id}/{id}` | ✅ | Delete category |
+| GET | `/groups` | ✅ | List my groups |
+| GET | `/groups/{id}` | ✅ | Get group |
+| POST | `/groups` | ✅ | Create group |
+| PUT | `/groups/{id}` | ✅ | Update group |
+| DELETE | `/groups/{id}` | ✅ | Delete group |
+| POST | `/groups/{group_id}/members` | ✅ | Add member |
+| DELETE | `/groups/{group_id}/members/{user_id}` | ✅ | Remove member |
+| POST | `/expenses` | ✅ | Create expense (splits computed) |
+| GET | `/expenses/group/{group_id}` | ✅ | List group expenses |
+| GET | `/expenses/{id}` | ✅ | Get expense |
+| PUT | `/expenses/{id}` | ✅ | Update expense |
+| DELETE | `/expenses/{id}` | ✅ | Delete expense |
+| GET | `/balances/group/{group_id}` | ✅ | Group balances |
+| GET | `/balances/me` | ✅ | My balances |
+| POST | `/settlements` | ✅ | Record settlement |
+| GET | `/settlements/group/{group_id}` | ✅ | List settlements |
+| DELETE | `/settlements/{id}` | ✅ | Delete settlement |
