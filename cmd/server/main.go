@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/amit9838/splitwise-backend-go/internal/balance"
 	"github.com/amit9838/splitwise-backend-go/internal/category"
 	"github.com/amit9838/splitwise-backend-go/internal/expense"
 	"github.com/amit9838/splitwise-backend-go/internal/group"
 	"github.com/amit9838/splitwise-backend-go/internal/pkg/auth"
 	"github.com/amit9838/splitwise-backend-go/internal/pkg/response"
+	"github.com/amit9838/splitwise-backend-go/internal/settlement"
 	"github.com/amit9838/splitwise-backend-go/internal/user"
 	_ "modernc.org/sqlite"
 )
@@ -114,12 +116,26 @@ func setupRouter(db *sql.DB, authMgr *auth.Manager) http.Handler {
 	// --------------- expense ------------
 	expStore := expense.NewDBStore(db)
 	mustInitSchema("expense", expStore)
-	expenseHandler := expense.NewHandler(expense.NewService(expStore))
+	expenseHandler := expense.NewHandler(expense.NewService(expStore, grpStore, memberStore))
 	register("POST /expenses", expenseHandler.Create)
 	register("GET /expenses/group/{group_id}", expenseHandler.List)
 	register("GET /expenses/{id}", expenseHandler.Get)
 	register("PUT /expenses/{id}", expenseHandler.Update)
 	register("DELETE /expenses/{id}", expenseHandler.Delete)
+
+	// --------------- settlement ------------
+	setStore := settlement.NewDBStore(db)
+	mustInitSchema("settlement", setStore)
+	settlementHandler := settlement.NewHandler(settlement.NewService(setStore, grpStore, memberStore))
+	register("POST /settlements", settlementHandler.Create)
+	register("GET /settlements/group/{group_id}", settlementHandler.List)
+	register("DELETE /settlements/{id}", settlementHandler.Delete)
+
+	// Balances
+	balanceHandler := balance.NewHandler(balance.NewService(expStore, setStore, grpStore, memberStore, userStore))
+	// balance
+	register("GET /balances/group/{group_id}", balanceHandler.Group)
+	register("GET /balances/me", balanceHandler.Me)
 
 	return mux
 }
