@@ -34,7 +34,8 @@ func RequireAuth(m *Manager) func(http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 
-			next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, userID)))
+			childContext := context.WithValue(r.Context(), ctxKey{}, userID)
+			next(w, r.WithContext(childContext))
 		}
 	}
 }
