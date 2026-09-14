@@ -1,0 +1,837 @@
+openapi: 3.0.3
+info:
+  title: Expense Manager API
+  description: |
+    Splitwise-style expense sharing backend (Go).
+    All routes are prefixed with `/api`. Monetary amounts are JSON numbers
+    rounded to two decimals. Datetimes are RFC 3339 strings.
+    Errors are `{"error": "message"}`.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+tags:
+  - { name: Auth, description: Registration, login and token refresh }
+  - { name: Users, description: User management }
+  - { name: Categories, description: Group-scoped expense categories }
+  - { name: Groups, description: Expense groups }
+  - { name: Members, description: Group membership }
+  - { name: Expenses, description: Expenses with computed splits }
+  - { name: Balances, description: Derived net balances and simplified settlements }
+  - { name: Settlements, description: Direct payments between members }
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "201":
+          description: Created user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login and receive tokens
+      description: Email matching is case-insensitive.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: Token pair
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenPair" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Exchange a refresh token for a new pair
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200":
+          description: New token pair
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenPair" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Current authenticated user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/users:
+    get:
+      tags: [Users]
+      summary: List all users
+      responses:
+        "200":
+          description: User list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/User" }
+    post:
+      tags: [Users]
+      summary: Create a user
+      description: Same behavior as `/api/auth/register`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "201":
+          description: Created user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    get:
+      tags: [Users]
+      summary: Get a user by id
+      responses:
+        "200":
+          description: Single user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Users]
+      summary: Update a user
+      description: All fields optional. Email is trimmed and lowercased; uniqueness is case-insensitive.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateUserRequest" }
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Users]
+      summary: Delete a user
+      responses:
+        "200": { $ref: "#/components/responses/Message" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/categories:
+    post:
+      tags: [Categories]
+      summary: Create a category in a group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateCategoryRequest" }
+      responses:
+        "201":
+          description: Created category
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Category" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/categories/{group_id}:
+    parameters:
+      - $ref: "#/components/parameters/GroupId"
+    get:
+      tags: [Categories]
+      summary: List a group's categories
+      responses:
+        "200":
+          description: Category list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Category" }
+
+  /api/categories/{group_id}/{id}:
+    parameters:
+      - $ref: "#/components/parameters/GroupId"
+      - $ref: "#/components/parameters/CategoryId"
+    get:
+      tags: [Categories]
+      summary: Get a single category
+      responses:
+        "200":
+          description: Single category
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Category" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Categories]
+      summary: Update a category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateCategoryRequest" }
+      responses:
+        "200":
+          description: Updated category
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Category" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Categories]
+      summary: Delete a category
+      responses:
+        "200": { $ref: "#/components/responses/Message" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/groups:
+    get:
+      tags: [Groups]
+      summary: List my groups
+      description: Groups the current user is an active member of, each with members.
+      responses:
+        "200":
+          description: Group list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Group" }
+    post:
+      tags: [Groups]
+      summary: Create a group
+      description: >-
+        The authenticated user is the creator and is added as a member
+        automatically. The group, creator membership and extra members are
+        created in one transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateGroupRequest" }
+      responses:
+        "201":
+          description: Created group with members
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Group" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/groups/{id}:
+    parameters:
+      - $ref: "#/components/parameters/GroupId2"
+    get:
+      tags: [Groups]
+      summary: Get a group with members
+      responses:
+        "200":
+          description: Single group
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Group" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Groups]
+      summary: Update a group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateGroupRequest" }
+      responses:
+        "200":
+          description: Updated group with members
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Group" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Groups]
+      summary: Delete a group
+      description: Creator only. Memberships, expenses and splits cascade.
+      responses:
+        "200": { $ref: "#/components/responses/Message" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/groups/{group_id}/members:
+    parameters:
+      - $ref: "#/components/parameters/GroupId"
+    post:
+      tags: [Members]
+      summary: Add a member
+      description: Re-adding a removed member reactivates the original membership.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Updated group with members
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Group" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/groups/{group_id}/members/{user_id}:
+    parameters:
+      - $ref: "#/components/parameters/GroupId"
+      - $ref: "#/components/parameters/UserId"
+    delete:
+      tags: [Members]
+      summary: Remove a member
+      description: Creator only; the creator cannot be removed. Soft delete.
+      responses:
+        "200": { $ref: "#/components/responses/Message" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/expenses:
+    post:
+      tags: [Expenses]
+      summary: Create an expense
+      description: >-
+        `paid_by` is always the authenticated user and must be an active group
+        member. Splits are computed server-side from `split_type` and stored in
+        one transaction. Rounding remainder goes to the first split.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateExpenseRequest" }
+      responses:
+        "201":
+          description: Created expense with computed splits
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Expense" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/expenses/group/{group_id}:
+    parameters:
+      - $ref: "#/components/parameters/GroupId"
+    get:
+      tags: [Expenses]
+      summary: List a group's active expenses
+      responses:
+        "200":
+          description: Expense list with splits
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Expense" }
+
+  /api/expenses/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ExpenseId"
+    get:
+      tags: [Expenses]
+      summary: Get an expense with splits
+      responses:
+        "200":
+          description: Single expense
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Expense" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Expenses]
+      summary: Update an expense
+      description: >-
+        All fields optional. `group_id`, `category_id` and `paid_by` are
+        immutable; updating `amount` or `split_type` does not recompute splits.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateExpenseRequest" }
+      responses:
+        "200":
+          description: Updated expense with splits
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Expense" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Expenses]
+      summary: Delete an expense and its splits
+      responses:
+        "200": { $ref: "#/components/responses/Message" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/balances/group/{group_id}:
+    parameters:
+      - $ref: "#/components/parameters/GroupId"
+    get:
+      tags: [Balances]
+      summary: Group balances and simplified settlements
+      description: >-
+        net = paid in expenses + paid in settlements - owed via splits -
+        received via settlements. Simplified settlements use greedy
+        max-debtor/max-creditor matching.
+      responses:
+        "200":
+          description: Group balance sheet
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GroupBalances" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/balances/me:
+    get:
+      tags: [Balances]
+      summary: My balances across all groups
+      responses:
+        "200":
+          description: Per-group position of the current user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyBalances" }
+
+  /api/settlements:
+    post:
+      tags: [Settlements]
+      summary: Record a settlement
+      description: "`paid_by` is always the authenticated user; both parties must be active members."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSettlementRequest" }
+      responses:
+        "201":
+          description: Created settlement
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settlement" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/settlements/group/{group_id}:
+    parameters:
+      - $ref: "#/components/parameters/GroupId"
+    get:
+      tags: [Settlements]
+      summary: List a group's settlements (most recent first)
+      responses:
+        "200":
+          description: Settlement list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Settlement" }
+
+  /api/settlements/{id}:
+    parameters:
+      - $ref: "#/components/parameters/SettlementId"
+    delete:
+      tags: [Settlements]
+      summary: Delete a settlement
+      description: Only the payer can delete.
+      responses:
+        "200": { $ref: "#/components/responses/Message" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Authorization: Bearer <access_token> (30 min expiry)"
+
+  parameters:
+    UserId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      description: User ID
+    GroupId:
+      name: group_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      description: Group ID
+    GroupId2:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      description: Group ID
+    CategoryId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      description: Category ID
+    ExpenseId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      description: Expense ID
+    SettlementId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      description: Settlement ID
+
+  responses:
+    Message:
+      description: Success message
+      content:
+        application/json:
+          schema: { type: string }
+          example: "deleted successfully!"
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { "error": "invalid request body" }
+    Unauthorized:
+      description: Missing/invalid/expired token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { "error": "Invalid token" }
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { "error": "only group creator can delete the group" }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { "error": "group not found" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        full_name: { type: string }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time, nullable: true }
+
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, description: Trimmed and lowercased server-side }
+        password: { type: string, format: password }
+        full_name: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        email: { type: string, format: email }
+        full_name: { type: string }
+        password: { type: string, format: password }
+        is_active: { type: boolean }
+
+    TokenPair:
+      type: object
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, example: bearer }
+
+    Category:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        group_id: { type: string, format: uuid }
+        name: { type: string }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateCategoryRequest:
+      type: object
+      required: [group_id, name]
+      properties:
+        group_id: { type: string, format: uuid }
+        name: { type: string }
+
+    UpdateCategoryRequest:
+      type: object
+      required: [name, is_active]
+      properties:
+        name: { type: string }
+        is_active: { type: boolean }
+
+    UserBrief:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        full_name: { type: string }
+
+    Member:
+      type: object
+      properties:
+        id: { type: string, format: uuid, description: Membership ID }
+        user_id: { type: string, format: uuid }
+        user: { $ref: "#/components/schemas/UserBrief" }
+        joined_at: { type: string, format: date-time }
+        is_active: { type: boolean }
+
+    Group:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        created_by: { type: string, format: uuid }
+        simplify_debts: { type: boolean }
+        currency: { type: string, example: INR }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        members:
+          type: array
+          items: { $ref: "#/components/schemas/Member" }
+
+    CreateGroupRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        member_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: Other members to add; creator must NOT be included
+        simplify_debts: { type: boolean, default: true }
+        currency: { type: string, default: INR }
+
+    UpdateGroupRequest:
+      type: object
+      properties:
+        name: { type: string }
+        simplify_debts: { type: boolean }
+        currency: { type: string }
+        is_active: { type: boolean }
+
+    SplitType:
+      type: string
+      enum: [EQUAL, EXACT, PERCENTAGE, SHARES]
+
+    Split:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        amount: { type: number, description: Two-decimal share }
+        percentage: { type: number, nullable: true }
+        shares: { type: integer, nullable: true }
+
+    SplitInput:
+      type: object
+      required: [user_id]
+      properties:
+        user_id: { type: string, format: uuid, description: Must be an active group member }
+        amount: { type: number, description: Required for EXACT }
+        percentage: { type: number, description: Required for PERCENTAGE }
+        shares: { type: integer, description: Required for SHARES, must be > 0 }
+
+    Expense:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        group_id: { type: string, format: uuid }
+        category_id: { type: string, format: uuid }
+        paid_by: { type: string, format: uuid }
+        amount: { type: number }
+        description: { type: string }
+        currency: { type: string, example: INR }
+        split_type: { $ref: "#/components/schemas/SplitType" }
+        expense_date: { type: string, format: date-time }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        splits:
+          type: array
+          items: { $ref: "#/components/schemas/Split" }
+
+    CreateExpenseRequest:
+      type: object
+      required: [group_id, category_id, amount, description, expense_date]
+      properties:
+        group_id: { type: string, format: uuid }
+        category_id: { type: string, format: uuid }
+        amount: { type: number, description: Must be > 0 }
+        description: { type: string }
+        currency: { type: string, default: INR }
+        split_type: { $ref: "#/components/schemas/SplitType" }
+        expense_date: { type: string, format: date-time, description: RFC 3339 }
+        splits:
+          type: array
+          items: { $ref: "#/components/schemas/SplitInput" }
+
+    UpdateExpenseRequest:
+      type: object
+      properties:
+        amount: { type: number }
+        description: { type: string }
+        currency: { type: string }
+        split_type: { $ref: "#/components/schemas/SplitType" }
+        expense_date: { type: string, format: date-time }
+        is_active: { type: boolean }
+
+    Settlement:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        group_id: { type: string, format: uuid }
+        paid_by: { type: string, format: uuid }
+        paid_to: { type: string, format: uuid }
+        amount: { type: number }
+        payment_method: { type: string, enum: [cash, bank, upi] }
+        note: { type: string }
+        settled_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+
+    CreateSettlementRequest:
+      type: object
+      required: [group_id, paid_to, amount]
+      properties:
+        group_id: { type: string, format: uuid }
+        paid_to: { type: string, format: uuid, description: Must be an active group member }
+        amount: { type: number, description: Must be > 0 }
+        payment_method: { type: string, enum: [cash, bank, upi], default: cash }
+        note: { type: string }
+
+    Balance:
+      type: object
+      properties:
+        user_id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        full_name: { type: string }
+        net_balance: { type: number }
+        status:
+          type: string
+          enum: [owed, owes, settled]
+
+    Transfer:
+      type: object
+      properties:
+        from_user_id: { type: string, format: uuid }
+        to_user_id: { type: string, format: uuid }
+        amount: { type: number }
+
+    GroupBalances:
+      type: object
+      properties:
+        group_id: { type: string, format: uuid }
+        group_name: { type: string }
+        balances:
+          type: array
+          items: { $ref: "#/components/schemas/Balance" }
+        simplified_settlements:
+          type: array
+          items: { $ref: "#/components/schemas/Transfer" }
+        total_settlements: { type: integer }
+
+    MyGroupBalance:
+      type: object
+      properties:
+        group_id: { type: string, format: uuid }
+        group_name: { type: string }
+        my_net_balance: { type: number }
+        my_settlements:
+          type: array
+          items: { $ref: "#/components/schemas/Transfer" }
+
+    MyBalances:
+      type: object
+      properties:
+        user_id: { type: string, format: uuid }
+        total_owed_to_me: { type: number }
+        total_i_owe: { type: number }
+        net_balance: { type: number }
+        groups:
+          type: array
+          items: { $ref: "#/components/schemas/MyGroupBalance" }
