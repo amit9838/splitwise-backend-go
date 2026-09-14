@@ -85,7 +85,7 @@ Register a new user. **No auth required.**
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| `email` | string | ✅ | Valid email format, unique |
+| `email` | string | ✅ | Valid email format, unique. Trimmed and lowercased server-side — uniqueness is **case-insensitive** (`User@Example.com` and `user@example.com` are the same account) |
 | `password` | string | ✅ | Plain text (hashed server-side) |
 | `full_name` | string | ❌ | Optional |
 
@@ -121,6 +121,8 @@ Authenticate and receive tokens. **No auth required.**
   "password": "secret123"
 }
 ```
+
+Email matching is case-insensitive (the address is trimmed and lowercased before lookup).
 
 **Response `200 OK`:**
 
@@ -221,7 +223,7 @@ Update a user. **Auth required.** All fields optional; only provided fields are 
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| `email` | string | ❌ | Must be unique |
+| `email` | string | ❌ | Must be unique (case-insensitive; trimmed and lowercased server-side) |
 | `full_name` | string | ❌ | |
 | `password` | string | ❌ | Re-hashed server-side |
 | `is_active` | boolean | ❌ | |
