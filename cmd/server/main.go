@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/amit9838/splitwise-backend-go/internal/apidocs"
 	"github.com/amit9838/splitwise-backend-go/internal/balance"
 	"github.com/amit9838/splitwise-backend-go/internal/category"
 	"github.com/amit9838/splitwise-backend-go/internal/expense"
@@ -66,6 +67,9 @@ func setupRouter(db *sql.DB, authMgr *auth.Manager) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", rootHandler)
 	mux.HandleFunc("GET /health", healthHandler)
+	mux.HandleFunc("GET /docs", apidocs.SwaggerUI)
+	mux.HandleFunc("GET /docs/openapi.yaml", apidocs.Spec)
+	mux.HandleFunc("GET /redoc", apidocs.ReDoc)
 
 	requireAuth := auth.RequireAuth(authMgr)
 	register := func(pattern string, h http.HandlerFunc) {
@@ -78,26 +82,26 @@ func setupRouter(db *sql.DB, authMgr *auth.Manager) http.Handler {
 	userHandler := user.NewHandler(user.NewService(userStore), authMgr)
 
 	// auth (public)
-	mux.HandleFunc("POST /auth/register", userHandler.Register)
-	mux.HandleFunc("POST /auth/login", userHandler.Login)
-	mux.HandleFunc("POST /auth/refresh", userHandler.Refresh)
+	mux.HandleFunc("POST /api/auth/register", userHandler.Register)
+	mux.HandleFunc("POST /api/auth/login", userHandler.Login)
+	mux.HandleFunc("POST /api/auth/refresh", userHandler.Refresh)
 	// users
-	mux.HandleFunc("POST /users", userHandler.Create)
-	register("GET /auth/me", userHandler.Me)
-	register("GET /users", userHandler.List)
-	register("GET /users/{id}", userHandler.Get)
-	register("PUT /users/{id}", userHandler.Update)
-	register("DELETE /users/{id}", userHandler.Delete)
+	mux.HandleFunc("POST /api/users", userHandler.Create)
+	register("GET /api/auth/me", userHandler.Me)
+	register("GET /api/users", userHandler.List)
+	register("GET /api/users/{id}", userHandler.Get)
+	register("PUT /api/users/{id}", userHandler.Update)
+	register("DELETE /api/users/{id}", userHandler.Delete)
 
 	// --------------- category ------------
 	catStore := category.NewDBStore(db)
 	mustInitSchema("category", catStore)
 	categoryHandler := category.NewHandler(category.NewService(catStore))
-	register("POST /categories", categoryHandler.Create)
-	register("GET /categories/{group_id}", categoryHandler.List)
-	register("GET /categories/{group_id}/{id}", categoryHandler.Get)
-	register("PUT /categories/{group_id}/{id}", categoryHandler.Update)
-	register("DELETE /categories/{group_id}/{id}", categoryHandler.Delete)
+	register("POST /api/categories", categoryHandler.Create)
+	register("GET /api/categories/{group_id}", categoryHandler.List)
+	register("GET /api/categories/{group_id}/{id}", categoryHandler.Get)
+	register("PUT /api/categories/{group_id}/{id}", categoryHandler.Update)
+	register("DELETE /api/categories/{group_id}/{id}", categoryHandler.Delete)
 
 	// --------------- group ------------
 	grpStore := group.NewDBStore(db)
@@ -105,37 +109,37 @@ func setupRouter(db *sql.DB, authMgr *auth.Manager) http.Handler {
 	memberStore := group.NewMemberDBStore(db)
 	mustInitSchema("group member", memberStore)
 	groupHandler := group.NewHandler(group.NewService(grpStore, memberStore, userStore))
-	register("POST /groups", groupHandler.Create)
-	register("GET /groups", groupHandler.List)
-	register("GET /groups/{id}", groupHandler.Get)
-	register("PUT /groups/{id}", groupHandler.Update)
-	register("DELETE /groups/{id}", groupHandler.Delete)
-	register("POST /groups/{group_id}/members", groupHandler.AddMember)
-	register("DELETE /groups/{group_id}/members/{user_id}", groupHandler.RemoveMember)
+	register("POST /api/groups", groupHandler.Create)
+	register("GET /api/groups", groupHandler.List)
+	register("GET /api/groups/{id}", groupHandler.Get)
+	register("PUT /api/groups/{id}", groupHandler.Update)
+	register("DELETE /api/groups/{id}", groupHandler.Delete)
+	register("POST /api/groups/{group_id}/members", groupHandler.AddMember)
+	register("DELETE /api/groups/{group_id}/members/{user_id}", groupHandler.RemoveMember)
 
 	// --------------- expense ------------
 	expStore := expense.NewDBStore(db)
 	mustInitSchema("expense", expStore)
 	expenseHandler := expense.NewHandler(expense.NewService(expStore, grpStore, memberStore))
-	register("POST /expenses", expenseHandler.Create)
-	register("GET /expenses/group/{group_id}", expenseHandler.List)
-	register("GET /expenses/{id}", expenseHandler.Get)
-	register("PUT /expenses/{id}", expenseHandler.Update)
-	register("DELETE /expenses/{id}", expenseHandler.Delete)
+	register("POST /api/expenses", expenseHandler.Create)
+	register("GET /api/expenses/group/{group_id}", expenseHandler.List)
+	register("GET /api/expenses/{id}", expenseHandler.Get)
+	register("PUT /api/expenses/{id}", expenseHandler.Update)
+	register("DELETE /api/expenses/{id}", expenseHandler.Delete)
 
 	// --------------- settlement ------------
 	setStore := settlement.NewDBStore(db)
 	mustInitSchema("settlement", setStore)
 	settlementHandler := settlement.NewHandler(settlement.NewService(setStore, grpStore, memberStore))
-	register("POST /settlements", settlementHandler.Create)
-	register("GET /settlements/group/{group_id}", settlementHandler.List)
-	register("DELETE /settlements/{id}", settlementHandler.Delete)
+	register("POST /api/settlements", settlementHandler.Create)
+	register("GET /api/settlements/group/{group_id}", settlementHandler.List)
+	register("DELETE /api/settlements/{id}", settlementHandler.Delete)
 
 	// Balances
 	balanceHandler := balance.NewHandler(balance.NewService(expStore, setStore, grpStore, memberStore, userStore))
 	// balance
-	register("GET /balances/group/{group_id}", balanceHandler.Group)
-	register("GET /balances/me", balanceHandler.Me)
+	register("GET /api/balances/group/{group_id}", balanceHandler.Group)
+	register("GET /api/balances/me", balanceHandler.Me)
 
 	return mux
 }
