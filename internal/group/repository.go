@@ -78,15 +78,22 @@ func scanGroup(scanner rowScanner) (Group, error) {
 	return g, nil
 }
 
-// Create inserts a new group.
-func (s *DBStore) Create(g Group) (Group, error) {
+// CreateWithMembers inserts a group, the creator's membership and any
+// additional member memberships in a single transaction.
+func (s *DBStore) CreateWithMembers(g Group, creatorID string, memberIDs []string) (Group, error) {
 	now := time.Now()
 	g.ID = uuid.NewString()
 	g.CreatedAt = now
 	g.UpdatedAt = now
 	formattedTS := now.Format(time.RFC3339)
 
-	_, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Group{}, err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(
 		`INSERT INTO groups (id, name, created_by, simplify_debts, currency, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		g.ID,
 		g.Name,
@@ -98,6 +105,22 @@ func (s *DBStore) Create(g Group) (Group, error) {
 		formattedTS,
 	)
 	if err != nil {
+		return Group{}, err
+	}
+
+	const memberInsert = `INSERT INTO group_members (id, group_id, user_id, is_active, joined_at) VALUES (?, ?, ?, 1, ?)`
+	_, err = tx.Exec(memberInsert, uuid.NewString(), g.ID, creatorID, formattedTS)
+	if err != nil {
+		return Group{}, err
+	}
+	for _, uid := range memberIDs {
+		_, err = tx.Exec(memberInsert, uuid.NewString(), g.ID, uid, formattedTS)
+		if err != nil {
+			return Group{}, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
 		return Group{}, err
 	}
 	return g, nil

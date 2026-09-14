@@ -6,16 +6,19 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/amit9838/splitwise-backend-go/internal/pkg/auth"
 	"github.com/amit9838/splitwise-backend-go/internal/pkg/response"
 )
 
 // GroupService is the business layer used by the handler.
 type GroupService interface {
-	Create(g Group) (Group, error)
+	Create(g Group, creatorID string, memberIDs []string) (Group, error)
 	GetById(id string) (Group, error)
-	List() ([]Group, error)
+	List(userID string) ([]Group, error)
 	Update(id string, g Group) (Group, error)
 	Delete(id string, requesterID string) (Group, error)
+	AddMember(groupID, userID string) (Group, error)
+	RemoveMember(groupID, requesterID, userID string) error
 }
 
 // Handler
@@ -30,18 +33,24 @@ func NewHandler(s GroupService) *Handler {
 
 // Create handles POST /groups
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	creatorID := auth.UserIDFrom(r.Context())
+	if creatorID == "" {
+		response.WriteError(w, http.StatusUnauthorized, "Invalid token")
+		return
+	}
+
 	var input struct {
-		Name          string `json:"name"`
-		CreatedBy     string `json:"created_by"`
-		SimplifyDebts *bool  `json:"simplify_debts"`
-		Currency      string `json:"currency"`
+		Name          string   `json:"name"`
+		MemberIDs     []string `json:"member_ids"`
+		SimplifyDebts *bool    `json:"simplify_debts"`
+		Currency      string   `json:"currency"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		response.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if input.Name == "" || input.CreatedBy == "" {
-		response.WriteError(w, http.StatusBadRequest, "name and created_by are required")
+	if input.Name == "" {
+		response.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 
@@ -52,16 +61,21 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.service.Create(Group{
 		Name:          input.Name,
-		CreatedBy:     input.CreatedBy,
 		SimplifyDebts: simplifyDebts,
 		Currency:      input.Currency,
-	})
+	}, creatorID, input.MemberIDs)
 	if err != nil {
-		if errors.Is(err, ErrNameRequired) || errors.Is(err, ErrCreatorRequired) {
+		switch {
+		case errors.Is(err, ErrNameRequired),
+			errors.Is(err, ErrCreatorRequired),
+			errors.Is(err, ErrCreatorInMembers),
+			errors.Is(err, ErrDuplicateMembers):
 			response.WriteError(w, http.StatusBadRequest, err.Error())
-			return
+		case errors.Is(err, ErrMembersNotFound):
+			response.WriteError(w, http.StatusNotFound, err.Error())
+		default:
+			response.WriteError(w, http.StatusInternalServerError, "failed to create group")
 		}
-		response.WriteError(w, http.StatusInternalServerError, "failed to create group")
 		return
 	}
 	response.WriteJSON(w, http.StatusCreated, created)
@@ -69,7 +83,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 // List handles GET /groups
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	groups, err := h.service.List()
+	userID := auth.UserIDFrom(r.Context())
+	if userID == "" {
+		response.WriteError(w, http.StatusUnauthorized, "Invalid token")
+		return
+	}
+
+	groups, err := h.service.List(userID)
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, "failed to list groups")
 		return
@@ -149,9 +169,9 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 // Delete handles DELETE /groups/{id}
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	requesterID := r.Header.Get("X-User-ID")
+	requesterID := auth.UserIDFrom(r.Context())
 	if requesterID == "" {
-		response.WriteError(w, http.StatusBadRequest, "X-User-ID header is required")
+		response.WriteError(w, http.StatusUnauthorized, "Invalid token")
 		return
 	}
 
@@ -169,4 +189,66 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.WriteJSON(w, http.StatusOK, fmt.Sprintf("Group '%s' deleted successfully!", deleted.Name))
+}
+
+// AddMember handles POST /groups/{group_id}/members
+func (h *Handler) AddMember(w http.ResponseWriter, r *http.Request) {
+	groupID := r.PathValue("group_id")
+
+	var input struct {
+		UserId string `json:"user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		response.WriteError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if input.UserId == "" {
+		response.WriteError(w, http.StatusBadRequest, "user_id is required")
+		return
+	}
+
+	g, err := h.service.AddMember(groupID, input.UserId)
+	if err != nil {
+		switch {
+		case errors.Is(err, response.ErrNotFound):
+			response.WriteError(w, http.StatusNotFound, "group not found")
+		case errors.Is(err, ErrUserNotFound):
+			response.WriteError(w, http.StatusNotFound, "user not found")
+		case errors.Is(err, ErrAlreadyMember):
+			response.WriteError(w, http.StatusBadRequest, "User is already a member of this group")
+		default:
+			response.WriteError(w, http.StatusInternalServerError, "failed to add member")
+		}
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, g)
+}
+
+// RemoveMember handles DELETE /groups/{group_id}/members/{user_id}
+func (h *Handler) RemoveMember(w http.ResponseWriter, r *http.Request) {
+	groupID := r.PathValue("group_id")
+	userID := r.PathValue("user_id")
+	requesterID := auth.UserIDFrom(r.Context())
+	if requesterID == "" {
+		response.WriteError(w, http.StatusUnauthorized, "Invalid token")
+		return
+	}
+
+	err := h.service.RemoveMember(groupID, requesterID, userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, response.ErrNotFound):
+			response.WriteError(w, http.StatusNotFound, "group not found")
+		case errors.Is(err, ErrNotCreator):
+			response.WriteError(w, http.StatusForbidden, "only group creator can remove members")
+		case errors.Is(err, ErrCannotRemoveCreator):
+			response.WriteError(w, http.StatusBadRequest, "Cannot remove the group creator")
+		case errors.Is(err, ErrNotMember):
+			response.WriteError(w, http.StatusNotFound, "Member not found in group")
+		default:
+			response.WriteError(w, http.StatusInternalServerError, "failed to remove member")
+		}
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, "Member removed successfully!")
 }
